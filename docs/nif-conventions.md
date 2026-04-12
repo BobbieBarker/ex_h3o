@@ -6,9 +6,15 @@ This document is the authoritative reference for NIF boundary design in ex_h3o. 
 
 **Never combine expensive computation with expensive term construction in a single NIF call.**
 
-The erlang-h3 library we're replacing is reported to have this problem: H3 computation followed by materialization of large BEAM term trees (lists of strings, tuples) inside dirty CPU NIFs. This causes GC pressure attributed to the dirty scheduler instead of the calling process. Verify this against the actual erlang-h3 source before citing it as confirmed fact.
+The erlang-h3 library we're replacing has two verified boundary design problems:
 
-ex_h3o must not repeat that shape regardless.
+1. **Dirty NIFs build massive BEAM lists.** `polyfill`, `compact`, and `uncompact` run on dirty CPU schedulers and construct full Erlang term lists (via `enif_make_list_cell` loops of `enif_make_uint64` terms) before returning. At high resolution, polyfill can produce millions of cells — all allocated on the process heap with no GC opportunity until the NIF returns.
+
+2. **Collection functions on normal schedulers.** `k_ring` and `children` follow the same pattern but run on normal schedulers (not dirty), blocking a normal scheduler for the entire computation + list construction. For large k values or wide resolution deltas, this can exceed the 1ms budget significantly.
+
+Note: the dirty NIFs do NOT do string formatting — H3 indices are returned as raw uint64 integers, not hex strings. The `h3_to_string` function is a separate NIF on a normal scheduler. The core issue is mass term allocation (list cells + integers), not string materialization.
+
+ex_h3o must not repeat either shape.
 
 ## BEAM Scheduler Architecture
 
