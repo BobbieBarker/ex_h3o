@@ -6,9 +6,9 @@ This document is the authoritative reference for NIF boundary design in ex_h3o. 
 
 **Never combine expensive computation with expensive term construction in a single NIF call.**
 
-The erlang-h3 library we're replacing got this wrong: it does H3 computation and then materializes large BEAM term trees (lists of strings, tuples) inside dirty CPU NIFs. This causes GC pressure attributed to the dirty scheduler instead of the calling process, creating GC churn and dirty scheduler pool exhaustion.
+The erlang-h3 library we're replacing is reported to have this problem: H3 computation followed by materialization of large BEAM term trees (lists of strings, tuples) inside dirty CPU NIFs. This causes GC pressure attributed to the dirty scheduler instead of the calling process. Verify this against the actual erlang-h3 source before citing it as confirmed fact.
 
-ex_h3o must not repeat that shape.
+ex_h3o must not repeat that shape regardless.
 
 ## BEAM Scheduler Architecture
 
@@ -18,11 +18,13 @@ ex_h3o must not repeat that shape.
 
 When a dirty NIF constructs terms, those terms are allocated on the calling process's heap, but GC cannot run until the NIF returns. Large allocations in a dirty NIF bloat the process heap with no GC relief, followed by a massive GC sweep when the NIF returns.
 
-## Return Value Patterns (in order of preference)
+## Return Value Patterns
 
-### 1. Direct Return (small results, <100 terms)
+These are the available patterns for returning data from NIFs, ordered from least to most GC pressure. The right choice depends on the specific function — profile and measure before committing to a pattern.
 
-For single values, small tuples, booleans, integers, floats. Runs on normal scheduler.
+### 1. Direct Return (small results)
+
+For single values, small tuples, booleans, integers, floats. Trivial term construction, runs on normal scheduler.
 
 ```rust
 #[rustler::nif]
@@ -32,11 +34,9 @@ fn resolution(cell: u64) -> NifResult<u8> {
 }
 ```
 
-Use for: `is_valid`, `is_pentagon`, `get_resolution`, `get_base_cell`, `parent`, `to_geo`, `grid_distance`, `from_geo`, `from_string`, `to_string`.
+### 2. Packed Binary (collections)
 
-### 2. Packed Binary (large homogeneous collections)
-
-Pack results into a single binary with a defined wire format. One refc binary = ~40 bytes GC-visible heap regardless of data size.
+Pack results into a single binary with a defined wire format. One refc binary = ~40 bytes GC-visible heap regardless of data size. Decode on the Elixir side with binary pattern matching.
 
 ```rust
 #[rustler::nif(schedule = "DirtyCpu")]
@@ -54,7 +54,7 @@ fn k_ring_packed(cell: u64, k: u32) -> NifResult<OwnedBinary> {
 }
 ```
 
-Elixir side decodes with binary pattern matching:
+Elixir side:
 ```elixir
 def k_ring(cell, k) do
   packed = ExH3o.Native.k_ring_packed(cell, k)
@@ -62,52 +62,42 @@ def k_ring(cell, k) do
 end
 ```
 
-Use for: `k_ring`, `k_ring_distances`, `children`, `compact`, `uncompact`, `polyfill`, `get_res0_indexes`, `to_geo_boundary`.
+### 3. Resource + Accessor (large or lazily consumed results)
 
-### 3. Resource + Accessor (large results needing random access or streaming)
-
-Store computation results in a `ResourceArc`, provide accessor NIFs on normal schedulers.
+Store computation results in a `ResourceArc` (opaque reference, ~1 word on process heap), provide accessor NIFs on normal schedulers to pull data out in chunks.
 
 ```rust
-struct PolyfillResult {
+struct ComputeResult {
     cells: Vec<CellIndex>,
 }
 
 #[rustler::resource_impl]
-impl Resource for PolyfillResult {}
+impl Resource for ComputeResult {}
 
 #[rustler::nif(schedule = "DirtyCpu")]
-fn polyfill_compute(/* polygon args */) -> ResourceArc<PolyfillResult> {
-    let cells = /* expensive tiling */;
-    ResourceArc::new(PolyfillResult { cells })
-}
-
-#[rustler::nif]  // Normal scheduler
-fn polyfill_count(resource: ResourceArc<PolyfillResult>) -> usize {
-    resource.cells.len()
+fn compute(/* args */) -> ResourceArc<ComputeResult> {
+    let cells = /* expensive work */;
+    ResourceArc::new(ComputeResult { cells })
 }
 
 #[rustler::nif]  // Normal scheduler, returns batch as packed binary
-fn polyfill_batch(resource: ResourceArc<PolyfillResult>, offset: usize, count: usize) -> OwnedBinary {
+fn get_batch(resource: ResourceArc<ComputeResult>, offset: usize, count: usize) -> OwnedBinary {
     let end = (offset + count).min(resource.cells.len());
     let slice = &resource.cells[offset..end];
     // pack into binary...
 }
 ```
 
-Use for: `polyfill` (can produce massive output), `set_to_multi_polygon`.
-
 ### 4. Threaded Async (fire-and-forget with result delivery)
 
-For truly long-running operations where the caller shouldn't block.
+Spawn a Rust thread, send the result to the calling process as a message. The NIF returns immediately.
 
 ```rust
 #[rustler::nif]
-fn polyfill_async(env: Env, /* args */) -> Atom {
+fn compute_async(env: Env, /* args */) -> Atom {
     let pid = env.pid();
     thread::spawn::<thread::ThreadSpawner, _>(env, move |thread_env| {
-        let result = expensive_tiling(/* args */);
-        // Pack as binary in the thread env
+        let result = expensive_work(/* args */);
         encode_packed_result(thread_env, &result)
     });
     atoms::ok()
@@ -116,38 +106,15 @@ fn polyfill_async(env: Env, /* args */) -> Atom {
 
 Use sparingly — only when the caller genuinely wants async semantics.
 
-## Scheduler Decision Table
+## Scheduler Guidelines
 
-| Function Category | Scheduler | Rationale |
-|---|---|---|
-| Single-cell inspection (`resolution`, `is_valid`, `is_pentagon`, `base_cell`) | Normal | Bit extraction, <1us |
-| Coordinate conversion (`from_geo`, `to_geo`, `to_geo_boundary`) | Normal | O(1) math, <10us |
-| String conversion (`from_string`, `to_string`) | Normal | Parse/format hex, <1us |
-| Hierarchy single (`parent`, `center_child`) | Normal | Bit manipulation, <1us |
-| Neighbor check (`is_neighbor`) | Normal | Comparison, <1us |
-| Grid distance | Normal | Path finding, typically <100us |
-| k_ring/grid_disk (k <= 6) | Normal | Few hundred cells, <1ms |
-| k_ring/grid_disk (k > 6) | DirtyCpu | Thousands of cells |
-| children (delta_res <= 3) | Normal | Up to 343 children |
-| children (delta_res > 3) | DirtyCpu | Can produce 16K+ children |
-| compact/uncompact | DirtyCpu | Operates on full sets |
-| polyfill | DirtyCpu | Polygon coverage, potentially huge |
-| set_to_multi_polygon | DirtyCpu | Boundary tracing |
-| Metadata (`num_hexagons`, `edge_length`, `hex_area`) | Normal | Constant lookup |
+- **Normal scheduler**: For operations that are clearly O(1) or bounded small (bit extraction, single coordinate conversion, validation, string parse). Must complete in <1ms.
+- **Dirty CPU**: For operations whose cost depends on input size and may exceed 1ms (traversal with large k, children at distant resolution, compaction over large sets, polygon coverage).
+- **When in doubt**: Profile first. Don't prematurely mark things as dirty — dirty schedulers are a limited pool.
 
-For functions that span both normal and dirty thresholds, implement a threshold check:
-```rust
-#[rustler::nif]
-fn k_ring(cell: u64, k: u32) -> NifResult<OwnedBinary> {
-    if k > 6 {
-        // Reschedule on dirty CPU
-        // (or provide separate k_ring_large function)
-    }
-    // ...
-}
-```
+For functions whose cost varies by input (e.g., k_ring with small vs large k), consider either providing two variants or using a runtime threshold to select the scheduler. The specific thresholds should be determined by benchmarking, not guessed.
 
-## h3o Rust API Mapping
+## h3o Rust API Reference
 
 ### Types
 
@@ -157,7 +124,7 @@ fn k_ring(cell: u64, k: u32) -> NifResult<OwnedBinary> {
 | `LatLng` | `{float(), float()}` | Two `f64` args |
 | `Resolution` | `0..15` integer | `u8` via `Resolution::try_from()` |
 | `DirectedEdgeIndex` | `non_neg_integer()` (u64) | `u64` via `TryFrom<u64>` |
-| `Boundary` | `[{float(), float()}]` | Pack as binary or small list |
+| `Boundary` | `[{float(), float()}]` | Pack as binary or small list (typically 5-6 vertices) |
 
 h3o uses strong typing (newtypes over u64). Validation happens at the Rust boundary via `TryFrom` — return `{:error, :invalid_index}` on failure.
 
@@ -169,6 +136,7 @@ h3o uses strong typing (newtypes over u64). Validation happens at the Rust bound
 - Iterators everywhere (`children()`, `grid_disk()`, `uncompact()`) — collect into Vec in the NIF
 - Polyfill uses a builder pattern with containment modes — expose mode as an optional parameter
 - `is_neighbor_with()` errors on resolution mismatch — handle gracefully
+- `geo` feature required for polygon operations (pulls in the `geo` crate)
 
 ### Error Mapping
 
@@ -227,7 +195,7 @@ The `geo` feature is required for polyfill and set_to_multi_polygon operations.
 
 ## Anti-Patterns (DO NOT)
 
-1. **DO NOT build large lists of small terms in a dirty NIF.** This is the erlang-h3 mistake. Use packed binaries instead.
+1. **DO NOT build large lists of small terms in a dirty NIF.** Use packed binaries or resources instead.
 
 2. **DO NOT format strings inside a NIF.** No `format!()` for building Elixir-visible strings. Return raw data, format in Elixir.
 
@@ -237,4 +205,4 @@ The `geo` feature is required for polyfill and set_to_multi_polygon operations.
 
 5. **DO NOT use `Vec<T>` return types for large collections.** Rustler auto-encodes `Vec<T>` as a BEAM list, hitting anti-pattern #1. Use `OwnedBinary` instead.
 
-6. **DO NOT ignore the 1ms rule.** Normal scheduler NIFs must complete in <1ms. If there's any doubt, use `schedule = "DirtyCpu"` or split the work.
+6. **DO NOT ignore the 1ms rule.** Normal scheduler NIFs must complete in <1ms. If there's any doubt, profile it.
