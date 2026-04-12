@@ -6,90 +6,172 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  MIX_ENV: test
-
 permissions:
-  contents: read
+  contents: write
+
+env:
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.2"
 
 jobs:
-  quality:
-    name: Quality Checks
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - elixir: "1.18"
-            otp: "27"
-          - elixir: "1.17"
-            otp: "26"
+  test:
+    runs-on: ubicloud-standard-4
+    env:
+      MIX_ENV: test
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ matrix.elixir }}
-          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Cache deps
+      - name: Restore deps cache
         uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-test-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
+            ${{ runner.os }}-mix-test-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Compile (warnings as errors)
-        run: mix compile --warnings-as-errors
-
       - name: Check formatting
+        id: format
         run: mix format --check-formatted
 
       - name: Credo
+        id: credo
         run: mix credo --strict
 
-      - name: Tests
-        run: mix test
+      - name: Compile (warnings as errors)
+        id: compile
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests with coverage
+        id: tests
+        run: mix test --cover --export-coverage default
+
+      - name: Generate lcov
+        if: always() && steps.tests.outcome == 'success'
+        run: |
+          rm -f cover/lcov.info
+          mix run --no-start -e '
+            :cover.start()
+            Path.wildcard("cover/*.coverdata")
+            |> Enum.each(fn f -> :cover.import(String.to_charlist(f)) end)
+            mods = :cover.imported_modules()
+            File.mkdir_p!("cover")
+            File.open!("cover/lcov.info", [:write], fn file ->
+              for mod <- mods do
+                src = mod.module_info(:compile) |> Keyword.get(:source) |> to_string()
+                if src != "" do
+                  {:ok, lines} = :cover.analyse(mod, :coverage, :line)
+                  IO.puts(file, "SF:#{src}")
+                  for {{_, line}, {cov, _}} <- Enum.sort_by(lines, fn {{_, l}, _} -> l end), line > 0 do
+                    IO.puts(file, "DA:#{line},#{cov}")
+                  end
+                  IO.puts(file, "end_of_record")
+                end
+              end
+            end)
+          '
+
+      - name: Extract uncovered lines for fixer agents
+        if: always() && steps.tests.outcome == 'success' && github.event_name == 'pull_request'
+        run: |
+          if [ ! -f cover/lcov.info ]; then
+            exit 0
+          fi
+
+          REPO_ROOT="$(pwd)/"
+
+          awk -v prefix="$REPO_ROOT" '
+            /^SF:/ {
+              current_file = substr($0, 4)
+              if (index(current_file, prefix) == 1) {
+                current_file = substr(current_file, length(prefix) + 1)
+              }
+            }
+            /^DA:/ {
+              split(substr($0, 4), parts, ",")
+              if (parts[2] == 0) print current_file ":" parts[1]
+            }
+          ' cover/lcov.info > /tmp/all_uncovered.txt
+
+          > /tmp/uncovered_lines.txt
+          while IFS= read -r line; do
+            if echo "$line" | grep -qE '^\+\+\+ b/'; then
+              current_file=$(echo "$line" | sed 's|^\+\+\+ b/||')
+              line_num=0
+            elif echo "$line" | grep -qE '^@@ '; then
+              line_num=$(echo "$line" | sed -E 's/.*\+([0-9]+).*/\1/')
+              line_num=$((line_num - 1))
+            elif echo "$line" | grep -q '^+' && ! echo "$line" | grep -q '^+++'; then
+              line_num=$((line_num + 1))
+              if grep -qF "${current_file}:${line_num}" /tmp/all_uncovered.txt; then
+                echo "  ${current_file}:${line_num}" >> /tmp/uncovered_lines.txt
+              fi
+            elif ! echo "$line" | grep -q '^-'; then
+              line_num=$((line_num + 1))
+            fi
+          done < <(git diff "origin/${{ github.base_ref }}"...HEAD --unified=0 -- '*.ex' '*.exs')
+
+          if [ -s /tmp/uncovered_lines.txt ]; then
+            echo "Uncovered lines in this PR:"
+            cat /tmp/uncovered_lines.txt
+          else
+            echo "All changed lines are covered."
+          fi
+
+      - name: Upload uncovered lines artifact
+        if: always() && steps.tests.outcome == 'success' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: uncovered-lines
+          path: /tmp/uncovered_lines.txt
+          retention-days: 1
+          if-no-files-found: ignore
 
   dialyzer:
-    name: Dialyzer
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-4
+    env:
+      MIX_ENV: dev
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Cache deps
+      - name: Restore deps cache
         uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.18-27-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-dev-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-1.18-27-
+            ${{ runner.os }}-mix-dev-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
-      - name: Cache PLTs
+      - name: Restore PLT cache
         uses: actions/cache@v4
         with:
-          path: priv/plts
-          key: ${{ runner.os }}-plt-1.18-27-${{ hashFiles('**/mix.lock') }}
+          path: _build/dev/dialyxir_*.plt*
+          key: ${{ runner.os }}-plt-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-plt-1.18-27-
+            ${{ runner.os }}-plt-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Create PLT directory
-        run: mkdir -p priv/plts
-
-      - name: Dialyzer
+      - name: Run Dialyzer
         run: mix dialyzer

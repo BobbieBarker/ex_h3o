@@ -8,7 +8,7 @@ defmodule ExH3o.MixProject do
     [
       app: :ex_h3o,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       dialyzer: dialyzer(),
