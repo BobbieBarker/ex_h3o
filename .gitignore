@@ -21,3 +21,9 @@ ex_h3o-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Forge Framework injected artifacts (proprietary — do not commit)
+/.claude/
+/review-prompts/
+/.forge-framework-cache/
+CLAUDE.md
