@@ -42,7 +42,10 @@ defmodule ExH3o.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      # :runtime_tools supplies :msacc, which the Stress.Harness uses to
+      # measure dirty CPU scheduler GC pressure. Bundled with OTP, zero
+      # runtime cost unless the harness is actually started.
+      extra_applications: [:logger, :runtime_tools]
     ]
   end
 

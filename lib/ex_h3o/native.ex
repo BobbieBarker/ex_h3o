@@ -5,9 +5,15 @@ defmodule ExH3o.Native do
                       do: ["test_utils"],
                       else: []
 
+  # `mode: :release` is not negotiable — benchmarks and stress tests rely on
+  # the release-optimized NIF. Debug builds are orders of magnitude slower
+  # and any numbers produced against them are worthless. Locking it in at
+  # the Rustler config level removes the risk of someone accidentally
+  # running `mix run bench/*.exs` against a debug build.
   use Rustler,
     otp_app: :ex_h3o,
     crate: "ex_h3o_nif",
+    mode: :release,
     features: @rustler_features
 
   @spec is_valid(non_neg_integer()) :: boolean()
