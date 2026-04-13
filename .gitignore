@@ -22,6 +22,12 @@ ex_h3o-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
+# Rust build artifacts
+/native/ex_h3o_nif/target/
+
+# Compiled NIF shared library
+/priv/native/
+
 # Forge Framework injected artifacts (proprietary — do not commit)
 /.claude/
 /review-prompts/
