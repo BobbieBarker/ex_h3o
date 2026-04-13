@@ -33,6 +33,18 @@ defmodule ExH3o.Native do
           {:ok, binary()} | {:error, :invalid_index | :invalid_resolution}
   def children(_cell, _resolution), do: :erlang.nif_error(:nif_not_loaded)
 
+  @spec indices_are_neighbors(non_neg_integer(), non_neg_integer()) ::
+          {:ok, boolean()} | {:error, :invalid_index | :resolution_mismatch}
+  def indices_are_neighbors(_a, _b), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec grid_distance(non_neg_integer(), non_neg_integer()) ::
+          {:ok, integer()} | {:error, :invalid_index | :local_ij_error}
+  def grid_distance(_a, _b), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec get_unidirectional_edge(non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_index | :not_neighbors}
+  def get_unidirectional_edge(_origin, _destination), do: :erlang.nif_error(:nif_not_loaded)
+
   @spec k_ring(non_neg_integer(), non_neg_integer()) ::
           {:ok, binary()} | {:error, :invalid_index}
   def k_ring(_cell, _k), do: :erlang.nif_error(:nif_not_loaded)

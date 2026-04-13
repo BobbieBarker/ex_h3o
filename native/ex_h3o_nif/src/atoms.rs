@@ -8,4 +8,5 @@ rustler::atoms! {
     compaction_failed,
     local_ij_error,
     dissolution_failed,
+    not_neighbors,
 }

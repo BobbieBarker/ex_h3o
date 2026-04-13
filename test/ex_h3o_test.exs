@@ -395,4 +395,131 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "indices_are_neighbors/2" do
+    # Adjacent cell obtained from k_ring(@valid_cell, 1)
+    @neighbor 0x8928308280BFFFF
+    # Non-adjacent cell obtained from k_ring(@valid_cell, 2) minus k_ring(1)
+    @non_adjacent 0x8928308281BFFFF
+    # Child at resolution 10 (different resolution from @valid_cell res 9)
+    @child_res10 0x8A28308280C7FFF
+
+    test "adjacent cells at same resolution return {:ok, true}" do
+      assert {:ok, true} = ExH3o.indices_are_neighbors(@valid_cell, @neighbor)
+    end
+
+    test "non-adjacent cells return {:ok, false}" do
+      assert {:ok, false} = ExH3o.indices_are_neighbors(@valid_cell, @non_adjacent)
+    end
+
+    test "cells at different resolutions return {:error, :resolution_mismatch}" do
+      assert {:error, :resolution_mismatch} =
+               ExH3o.indices_are_neighbors(@valid_cell, @child_res10)
+    end
+
+    test "invalid cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.indices_are_neighbors(@zero, @valid_cell)
+    end
+
+    test "invalid second cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.indices_are_neighbors(@valid_cell, @zero)
+    end
+
+    test "a cell is not a neighbor to itself" do
+      assert {:ok, false} = ExH3o.indices_are_neighbors(@valid_cell, @valid_cell)
+    end
+
+    property "returns {:ok, boolean()} or {:error, atom()} for any inputs" do
+      check all(
+              a <- non_negative_integer(),
+              b <- non_negative_integer()
+            ) do
+        case ExH3o.indices_are_neighbors(a, b) do
+          {:ok, result} -> assert is_boolean(result)
+          {:error, :invalid_index} -> :ok
+          {:error, :resolution_mismatch} -> :ok
+        end
+      end
+    end
+  end
+
+  describe "grid_distance/2" do
+    @neighbor 0x8928308280BFFFF
+
+    test "distance from a cell to itself is 0" do
+      assert {:ok, 0} = ExH3o.grid_distance(@valid_cell, @valid_cell)
+    end
+
+    test "distance between adjacent cells is 1" do
+      assert {:ok, 1} = ExH3o.grid_distance(@valid_cell, @neighbor)
+    end
+
+    test "invalid cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.grid_distance(@zero, @valid_cell)
+    end
+
+    test "invalid second cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.grid_distance(@valid_cell, @zero)
+    end
+
+    test "return type is integer (signed)" do
+      assert {:ok, dist} = ExH3o.grid_distance(@valid_cell, @valid_cell)
+      assert is_integer(dist)
+    end
+
+    property "returns {:ok, integer()} or {:error, atom()} for any inputs" do
+      check all(
+              a <- non_negative_integer(),
+              b <- non_negative_integer()
+            ) do
+        case ExH3o.grid_distance(a, b) do
+          {:ok, dist} -> assert is_integer(dist)
+          {:error, :invalid_index} -> :ok
+          {:error, :local_ij_error} -> :ok
+        end
+      end
+    end
+  end
+
+  describe "get_unidirectional_edge/2" do
+    @neighbor 0x8928308280BFFFF
+    @non_adjacent 0x8928308281BFFFF
+
+    test "edge between adjacent cells returns {:ok, edge_index} where edge_index > 0" do
+      assert {:ok, edge} = ExH3o.get_unidirectional_edge(@valid_cell, @neighbor)
+      assert edge > 0
+    end
+
+    test "edge between non-adjacent cells returns {:error, :not_neighbors}" do
+      assert {:error, :not_neighbors} =
+               ExH3o.get_unidirectional_edge(@valid_cell, @non_adjacent)
+    end
+
+    test "invalid cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.get_unidirectional_edge(@zero, @valid_cell)
+    end
+
+    test "invalid second cell returns {:error, :invalid_index}" do
+      assert {:error, :invalid_index} = ExH3o.get_unidirectional_edge(@valid_cell, @zero)
+    end
+
+    test "edge index is a valid non-negative integer" do
+      assert {:ok, edge} = ExH3o.get_unidirectional_edge(@valid_cell, @neighbor)
+      assert is_integer(edge)
+      assert edge > 0
+    end
+
+    property "returns {:ok, non_neg_integer()} or {:error, atom()} for any inputs" do
+      check all(
+              a <- non_negative_integer(),
+              b <- non_negative_integer()
+            ) do
+        case ExH3o.get_unidirectional_edge(a, b) do
+          {:ok, edge} -> assert is_integer(edge) and edge > 0
+          {:error, :invalid_index} -> :ok
+          {:error, :not_neighbors} -> :ok
+        end
+      end
+    end
+  end
 end
