@@ -93,4 +93,68 @@ defmodule ExH3o do
   """
   @spec is_class3(non_neg_integer()) :: {:ok, boolean()} | {:error, :invalid_index}
   defdelegate is_class3(cell), to: ExH3o.Native
+
+  @doc """
+  Returns whether two H3 cell indices are neighbors (adjacent).
+
+  Both cells must be at the same resolution. Returns `{:error, :resolution_mismatch}`
+  if resolutions differ.
+
+  ## Examples
+
+      iex> ExH3o.indices_are_neighbors(0x8928308280fffff, 0x8928308280bffff)
+      {:ok, true}
+
+      iex> ExH3o.indices_are_neighbors(0x8928308280fffff, 0x8928308281bffff)
+      {:ok, false}
+
+      iex> ExH3o.indices_are_neighbors(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec indices_are_neighbors(non_neg_integer(), non_neg_integer()) ::
+          {:ok, boolean()} | {:error, :invalid_index | :resolution_mismatch}
+  defdelegate indices_are_neighbors(a, b), to: ExH3o.Native
+
+  @doc """
+  Returns the grid distance between two H3 cell indices.
+
+  The grid distance is the minimum number of cell hops to get from one cell
+  to the other. Returns a signed integer faithfully representing h3o's `i32`.
+
+  ## Examples
+
+      iex> ExH3o.grid_distance(0x8928308280fffff, 0x8928308280fffff)
+      {:ok, 0}
+
+      iex> ExH3o.grid_distance(0x8928308280fffff, 0x8928308280bffff)
+      {:ok, 1}
+
+      iex> ExH3o.grid_distance(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec grid_distance(non_neg_integer(), non_neg_integer()) ::
+          {:ok, integer()} | {:error, :invalid_index | :local_ij_error}
+  defdelegate grid_distance(a, b), to: ExH3o.Native
+
+  @doc """
+  Returns the directed edge index from `origin` to `destination`.
+
+  Both cells must be neighbors. Returns `{:error, :not_neighbors}` if they
+  are not adjacent.
+
+  ## Examples
+
+      iex> {:ok, edge} = ExH3o.get_unidirectional_edge(0x8928308280fffff, 0x8928308280bffff)
+      iex> edge > 0
+      true
+
+      iex> ExH3o.get_unidirectional_edge(0x8928308280fffff, 0x8928308281bffff)
+      {:error, :not_neighbors}
+
+      iex> ExH3o.get_unidirectional_edge(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec get_unidirectional_edge(non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_index | :not_neighbors}
+  defdelegate get_unidirectional_edge(origin, destination), to: ExH3o.Native
 end

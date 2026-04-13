@@ -25,6 +25,18 @@ defmodule ExH3o.Native do
   @spec is_class3(non_neg_integer()) :: {:ok, boolean()} | {:error, :invalid_index}
   def is_class3(_cell), do: :erlang.nif_error(:nif_not_loaded)
 
+  @spec indices_are_neighbors(non_neg_integer(), non_neg_integer()) ::
+          {:ok, boolean()} | {:error, :invalid_index | :resolution_mismatch}
+  def indices_are_neighbors(_a, _b), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec grid_distance(non_neg_integer(), non_neg_integer()) ::
+          {:ok, integer()} | {:error, :invalid_index | :local_ij_error}
+  def grid_distance(_a, _b), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec get_unidirectional_edge(non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_index | :not_neighbors}
+  def get_unidirectional_edge(_origin, _destination), do: :erlang.nif_error(:nif_not_loaded)
+
   if Application.compile_env(:ex_h3o, :include_test_utils, false) do
     @doc false
     @spec dirty_sleep(non_neg_integer()) :: :ok
