@@ -3,6 +3,7 @@ mod types;
 
 use h3o::{CellIndex, Resolution};
 use rustler::sys::{enif_set_option, ErlNifOption};
+use rustler::{Encoder, Env, NewBinary, Term};
 
 #[rustler::nif]
 fn is_valid(cell: u64) -> bool {
@@ -41,6 +42,32 @@ fn parent(cell: u64, resolution: u8) -> Result<u64, rustler::Atom> {
         .parent(res)
         .map(u64::from)
         .ok_or(atoms::invalid_resolution())
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn children<'a>(env: Env<'a>, cell: u64, resolution: u8) -> Term<'a> {
+    let cell_index = match CellIndex::try_from(cell) {
+        Ok(c) => c,
+        Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+    };
+    let cell_res = u8::from(cell_index.resolution());
+    let res = match Resolution::try_from(resolution) {
+        Ok(r) => r,
+        Err(_) => return (atoms::error(), atoms::invalid_resolution()).encode(env),
+    };
+
+    if resolution < cell_res {
+        return (atoms::error(), atoms::invalid_resolution()).encode(env);
+    }
+
+    let cells: Vec<CellIndex> = cell_index.children(res).collect();
+    let mut binary = NewBinary::new(env, cells.len() * 8);
+    let buf = binary.as_mut_slice();
+    for (i, c) in cells.iter().enumerate() {
+        buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
 }
 
 /// Dirty CPU NIF that sleeps for `ms` milliseconds and returns `:ok`.
