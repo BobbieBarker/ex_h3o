@@ -1,7 +1,7 @@
 mod atoms;
 mod types;
 
-use h3o::{CellIndex, Resolution};
+use h3o::{CellIndex, LatLng, Resolution};
 use rustler::sys::{enif_set_option, ErlNifOption};
 use rustler::{Encoder, Env, NewBinary, Term};
 
@@ -55,6 +55,42 @@ fn parent(cell: u64, resolution: u8) -> Result<u64, rustler::Atom> {
         .parent(res)
         .map(u64::from)
         .ok_or(atoms::invalid_resolution())
+}
+
+#[rustler::nif]
+fn from_geo(lat: f64, lng: f64, resolution: u8) -> Result<u64, rustler::Atom> {
+    if !lat.is_finite() || !lng.is_finite() || lat < -90.0 || lat > 90.0 || lng < -180.0 || lng > 180.0
+    {
+        return Err(atoms::invalid_coordinates());
+    }
+    let res = Resolution::try_from(resolution).map_err(|_| atoms::invalid_resolution())?;
+    let ll = LatLng::new(lat, lng).map_err(|_| atoms::invalid_coordinates())?;
+    Ok(u64::from(ll.to_cell(res)))
+}
+
+#[rustler::nif]
+fn to_geo(cell: u64) -> Result<(f64, f64), rustler::Atom> {
+    let cell_index = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    let ll = LatLng::from(cell_index);
+    Ok((ll.lat(), ll.lng()))
+}
+
+#[rustler::nif]
+fn to_geo_boundary<'a>(env: Env<'a>, cell: u64) -> Term<'a> {
+    let cell_index = match CellIndex::try_from(cell) {
+        Ok(c) => c,
+        Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+    };
+    let boundary = cell_index.boundary();
+    let len = boundary.len();
+    let mut binary = NewBinary::new(env, len * 16);
+    let buf = binary.as_mut_slice();
+    for (i, ll) in boundary.iter().enumerate() {
+        buf[i * 16..i * 16 + 8].copy_from_slice(&ll.lat().to_ne_bytes());
+        buf[i * 16 + 8..(i + 1) * 16].copy_from_slice(&ll.lng().to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]

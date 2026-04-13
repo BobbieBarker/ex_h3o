@@ -35,6 +35,16 @@ defmodule ExH3o.Native do
           {:ok, non_neg_integer()} | {:error, :invalid_index | :invalid_resolution}
   def parent(_cell, _resolution), do: :erlang.nif_error(:nif_not_loaded)
 
+  @spec from_geo(float(), float(), 0..15) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_coordinates | :invalid_resolution}
+  def from_geo(_lat, _lng, _resolution), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec to_geo(non_neg_integer()) :: {:ok, {float(), float()}} | {:error, :invalid_index}
+  def to_geo(_cell), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec to_geo_boundary(non_neg_integer()) :: {:ok, binary()} | {:error, :invalid_index}
+  def to_geo_boundary(_cell), do: :erlang.nif_error(:nif_not_loaded)
+
   @spec children(non_neg_integer(), 0..15) ::
           {:ok, binary()} | {:error, :invalid_index | :invalid_resolution}
   def children(_cell, _resolution), do: :erlang.nif_error(:nif_not_loaded)

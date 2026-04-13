@@ -794,4 +794,193 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "from_geo/2" do
+    test "returns {:ok, cell} for San Francisco coordinates at resolution 9" do
+      assert {:ok, cell} = ExH3o.from_geo({37.7749, -122.4194}, 9)
+      assert is_integer(cell)
+      assert cell > 0
+      assert ExH3o.is_valid(cell)
+    end
+
+    test "returned cell has the requested resolution" do
+      assert {:ok, cell} = ExH3o.from_geo({37.7749, -122.4194}, 9)
+      assert {:ok, 9} = ExH3o.get_resolution(cell)
+    end
+
+    test "works at all valid resolutions (0–15)" do
+      Enum.each(0..15, fn res ->
+        assert {:ok, cell} = ExH3o.from_geo({37.7749, -122.4194}, res)
+        assert {:ok, ^res} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "returns {:error, :invalid_coordinates} for latitude out of range" do
+      assert {:error, :invalid_coordinates} = ExH3o.from_geo({91.0, 0.0}, 9)
+    end
+
+    test "returns {:error, :invalid_coordinates} for negative latitude out of range" do
+      assert {:error, :invalid_coordinates} = ExH3o.from_geo({-91.0, 0.0}, 9)
+    end
+
+    test "returns {:error, :invalid_coordinates} for longitude out of range" do
+      assert {:error, :invalid_coordinates} = ExH3o.from_geo({0.0, 181.0}, 9)
+    end
+
+    test "returns {:error, :invalid_resolution} for resolution > 15" do
+      assert {:error, :invalid_resolution} = ExH3o.from_geo({0.0, 0.0}, 16)
+    end
+
+    test "returns {:error, :invalid_coordinates} for NaN atom in lat" do
+      assert {:error, :invalid_coordinates} = ExH3o.from_geo({:nan, 0.0}, 9)
+    end
+
+    test "returns {:error, :invalid_coordinates} for NaN atom in lng" do
+      assert {:error, :invalid_coordinates} = ExH3o.from_geo({0.0, :nan}, 9)
+    end
+
+    test "handles boundary coordinates: north pole" do
+      assert {:ok, cell} = ExH3o.from_geo({90.0, 0.0}, 0)
+      assert ExH3o.is_valid(cell)
+    end
+
+    test "handles boundary coordinates: south pole" do
+      assert {:ok, cell} = ExH3o.from_geo({-90.0, 0.0}, 0)
+      assert ExH3o.is_valid(cell)
+    end
+
+    test "handles boundary coordinates: antimeridian" do
+      assert {:ok, cell} = ExH3o.from_geo({0.0, 180.0}, 0)
+      assert ExH3o.is_valid(cell)
+    end
+
+    property "returns {:ok, _} or {:error, _} for valid coordinate ranges" do
+      check all(
+              lat <- float(min: -90.0, max: 90.0),
+              lng <- float(min: -180.0, max: 180.0),
+              res <- integer(0..15)
+            ) do
+        assert {:ok, cell} = ExH3o.from_geo({lat, lng}, res)
+        assert ExH3o.is_valid(cell)
+      end
+    end
+  end
+
+  describe "to_geo/1" do
+    test "returns {:ok, {lat, lng}} for a known valid cell" do
+      assert {:ok, {lat, lng}} = ExH3o.to_geo(@valid_cell)
+      assert is_float(lat)
+      assert is_float(lng)
+    end
+
+    test "lat is in [-90, 90] and lng in [-180, 180]" do
+      assert {:ok, {lat, lng}} = ExH3o.to_geo(@valid_cell)
+      assert lat >= -90.0 and lat <= 90.0
+      assert lng >= -180.0 and lng <= 180.0
+    end
+
+    test "returns {:error, :invalid_index} for zero" do
+      assert {:error, :invalid_index} = ExH3o.to_geo(@zero)
+    end
+
+    test "returns {:error, :invalid_index} for garbage" do
+      assert {:error, :invalid_index} = ExH3o.to_geo(@garbage)
+    end
+
+    test "returns {:error, :invalid_index} for max uint64" do
+      assert {:error, :invalid_index} = ExH3o.to_geo(@max_uint64)
+    end
+
+    property "returns valid coordinates or error for any non-negative integer" do
+      check all(cell <- non_negative_integer()) do
+        case ExH3o.to_geo(cell) do
+          {:ok, {lat, lng}} ->
+            assert lat >= -90.0 and lat <= 90.0
+            assert lng >= -180.0 and lng <= 180.0
+
+          {:error, :invalid_index} ->
+            :ok
+        end
+      end
+    end
+  end
+
+  describe "to_geo_boundary/1" do
+    test "returns {:ok, vertices} for a known hexagon cell" do
+      assert {:ok, vertices} = ExH3o.to_geo_boundary(@valid_cell)
+      assert is_list(vertices)
+      assert length(vertices) == 6
+    end
+
+    test "returns 5 vertices for a pentagon cell" do
+      assert {:ok, vertices} = ExH3o.to_geo_boundary(@pentagon_cell)
+      assert length(vertices) == 5
+    end
+
+    test "each vertex is a {lat, lng} tuple with valid ranges" do
+      assert {:ok, vertices} = ExH3o.to_geo_boundary(@valid_cell)
+
+      Enum.each(vertices, fn {lat, lng} ->
+        assert is_float(lat)
+        assert is_float(lng)
+        assert lat >= -90.0 and lat <= 90.0
+        assert lng >= -180.0 and lng <= 180.0
+      end)
+    end
+
+    test "returns {:error, :invalid_index} for zero" do
+      assert {:error, :invalid_index} = ExH3o.to_geo_boundary(@zero)
+    end
+
+    test "returns {:error, :invalid_index} for garbage" do
+      assert {:error, :invalid_index} = ExH3o.to_geo_boundary(@garbage)
+    end
+
+    test "returns {:error, :invalid_index} for max uint64" do
+      assert {:error, :invalid_index} = ExH3o.to_geo_boundary(@max_uint64)
+    end
+
+    property "returns 5 or 6 vertices with valid coordinates for any valid cell" do
+      check all(cell <- non_negative_integer()) do
+        case ExH3o.to_geo_boundary(cell) do
+          {:ok, vertices} ->
+            assert length(vertices) in [5, 6]
+
+            Enum.each(vertices, fn {lat, lng} ->
+              assert lat >= -90.0 and lat <= 90.0
+              assert lng >= -180.0 and lng <= 180.0
+            end)
+
+          {:error, :invalid_index} ->
+            :ok
+        end
+      end
+    end
+  end
+
+  describe "from_geo/to_geo roundtrip" do
+    test "roundtrip produces coordinates within 0.01° of original" do
+      coords = {37.7749, -122.4194}
+      assert {:ok, cell} = ExH3o.from_geo(coords, 9)
+      assert {:ok, {lat, lng}} = ExH3o.to_geo(cell)
+
+      {orig_lat, orig_lng} = coords
+      assert abs(lat - orig_lat) < 0.01
+      assert abs(lng - orig_lng) < 0.01
+    end
+
+    property "roundtrip within 0.02° for any valid coordinates at resolution 9" do
+      # Avoid poles and antimeridian where cell centers can wrap significantly.
+      # Tolerance is 0.02° because high-latitude cells are wider in longitude.
+      check all(
+              lat <- float(min: -85.0, max: 85.0),
+              lng <- float(min: -170.0, max: 170.0)
+            ) do
+        assert {:ok, cell} = ExH3o.from_geo({lat, lng}, 9)
+        assert {:ok, {rlat, rlng}} = ExH3o.to_geo(cell)
+        assert abs(rlat - lat) < 0.02
+        assert abs(rlng - lng) < 0.02
+      end
+    end
+  end
 end
