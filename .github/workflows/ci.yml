@@ -152,6 +152,7 @@ jobs:
         with:
           files: cover/lcov.info
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload uncovered lines artifact
         if: always() && steps.tests.outcome == 'success' && github.event_name == 'pull_request'
