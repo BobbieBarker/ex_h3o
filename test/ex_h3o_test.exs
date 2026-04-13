@@ -162,6 +162,102 @@ defmodule ExH3oTest do
     end
   end
 
+  describe "children/2" do
+    test "hexagon at next resolution returns 7 children" do
+      assert {:ok, children} = ExH3o.children(@valid_cell, 10)
+      assert length(children) == 7
+
+      Enum.each(children, fn child ->
+        assert {:ok, 10} = ExH3o.get_resolution(child)
+      end)
+    end
+
+    test "pentagon at next resolution returns 6 children" do
+      assert {:ok, children} = ExH3o.children(@pentagon_cell, 1)
+      assert length(children) == 6
+
+      Enum.each(children, fn child ->
+        assert {:ok, 1} = ExH3o.get_resolution(child)
+      end)
+    end
+
+    test "children count at res+2 is 49 for hexagon" do
+      assert {:ok, children} = ExH3o.children(@valid_cell, 11)
+      assert length(children) == 49
+
+      Enum.each(children, fn child ->
+        assert {:ok, 11} = ExH3o.get_resolution(child)
+      end)
+    end
+
+    test "all children are valid H3 cells" do
+      assert {:ok, children} = ExH3o.children(@valid_cell, 10)
+
+      Enum.each(children, fn child ->
+        assert ExH3o.is_valid(child)
+      end)
+    end
+
+    test "children at same resolution returns only self" do
+      assert {:ok, [cell]} = ExH3o.children(@valid_cell, 9)
+      assert cell == @valid_cell
+    end
+
+    test "returns error for coarser resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.children(@valid_cell, 8)
+    end
+
+    test "returns error for resolution out of range" do
+      assert {:error, :invalid_resolution} = ExH3o.children(@valid_cell, 16)
+    end
+
+    test "returns error for invalid cell index" do
+      assert {:error, :invalid_index} = ExH3o.children(@zero, 5)
+    end
+
+    test "returns error for garbage cell" do
+      assert {:error, :invalid_index} = ExH3o.children(@garbage, 5)
+    end
+
+    test "returns error for max uint64 cell" do
+      assert {:error, :invalid_index} = ExH3o.children(@max_uint64, 5)
+    end
+
+    property "children at next resolution returns list of valid cells" do
+      check all(cell <- non_negative_integer()) do
+        with {:ok, res} when res < 15 <- ExH3o.get_resolution(cell),
+             {:ok, children} <- ExH3o.children(cell, res + 1) do
+          assert is_list(children)
+          assert length(children) in [6, 7]
+
+          Enum.each(children, fn child ->
+            assert {:ok, ^res} =
+                     ExH3o.get_resolution(child) |> then(fn {:ok, r} -> {:ok, r - 1} end)
+          end)
+        end
+      end
+    end
+
+    property "returns {:ok, _} or {:error, :invalid_index | :invalid_resolution} for any inputs" do
+      check all(
+              cell <- non_negative_integer(),
+              res <- integer(0..15)
+            ) do
+        case ExH3o.children(cell, res) do
+          {:ok, children} ->
+            assert is_list(children)
+            Enum.each(children, fn child -> assert is_integer(child) and child > 0 end)
+
+          {:error, :invalid_index} ->
+            :ok
+
+          {:error, :invalid_resolution} ->
+            :ok
+        end
+      end
+    end
+  end
+
   describe "parent/2" do
     test "returns parent at coarser resolution" do
       assert {:ok, parent_cell} = ExH3o.parent(@valid_cell, 8)

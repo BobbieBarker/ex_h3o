@@ -116,4 +116,39 @@ defmodule ExH3o do
   @spec parent(non_neg_integer(), 0..15) ::
           {:ok, non_neg_integer()} | {:error, :invalid_index | :invalid_resolution}
   defdelegate parent(cell, resolution), to: ExH3o.Native
+
+  @doc """
+  Returns the children cells at the given resolution.
+
+  The target resolution must be finer than (greater than) or equal to the
+  cell's current resolution. At the same resolution, returns a list
+  containing only the cell itself. Hexagons produce 7 children at the
+  next resolution; pentagons produce 6.
+
+  The NIF returns a packed binary of u64 cell indices for efficiency —
+  this function decodes it into a list of integers.
+
+  ## Examples
+
+      iex> {:ok, children} = ExH3o.children(0x8928308280fffff, 10)
+      iex> length(children)
+      7
+
+      iex> ExH3o.children(0, 5)
+      {:error, :invalid_index}
+
+      iex> ExH3o.children(0x8928308280fffff, 8)
+      {:error, :invalid_resolution}
+  """
+  @spec children(non_neg_integer(), 0..15) ::
+          {:ok, [non_neg_integer()]} | {:error, :invalid_index | :invalid_resolution}
+  def children(cell, resolution) do
+    case ExH3o.Native.children(cell, resolution) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok, for(<<index::native-unsigned-64 <- packed>>, do: index)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 end
