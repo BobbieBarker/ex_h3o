@@ -38,8 +38,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            native/ex_h3o_nif/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/ex_h3o_nif/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -49,7 +49,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-test-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: ${{ runner.os }}-mix-test-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock', 'native/ex_h3o_nif/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-test-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
@@ -182,8 +182,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            native/ex_h3o_nif/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/ex_h3o_nif/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -193,7 +193,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-dev-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: ${{ runner.os }}-mix-dev-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock', 'native/ex_h3o_nif/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-dev-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
