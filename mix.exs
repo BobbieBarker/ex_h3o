@@ -60,7 +60,11 @@ defmodule ExH3o.MixProject do
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:stream_data, "~> 0.6", only: [:dev, :test]},
-      {:benchee, "~> 1.0", only: [:dev, :test]}
+      {:benchee, "~> 1.0", only: [:dev, :test]},
+      # erlang-h3 is the reference Erlang binding for libh3 3.x, used
+      # only as the comparison target for benchmarks. It vendors its
+      # own libh3 C source so no system library install is required.
+      {:h3, "~> 3.7", only: [:dev, :test]}
     ]
   end
 
