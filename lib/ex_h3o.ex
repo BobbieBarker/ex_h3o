@@ -151,6 +151,64 @@ defmodule ExH3o do
   defdelegate parent(cell, resolution), to: ExH3o.Native
 
   @doc """
+  Returns whether two H3 cell indices are neighbors (share an edge).
+
+  Both cells must be at the same resolution. If they have different
+  resolutions, returns `{:error, :resolution_mismatch}`.
+
+  ## Examples
+
+      iex> ExH3o.indices_are_neighbors(0x8928308280fffff, 0x8928308280bffff)
+      {:ok, true}
+
+      iex> ExH3o.indices_are_neighbors(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec indices_are_neighbors(non_neg_integer(), non_neg_integer()) ::
+          {:ok, boolean()} | {:error, :invalid_index | :resolution_mismatch}
+  defdelegate indices_are_neighbors(a, b), to: ExH3o.Native
+
+  @doc """
+  Returns the grid distance between two H3 cell indices.
+
+  Grid distance is the minimum number of cell hops needed to get from
+  one cell to the other. Returns a signed integer (faithfully representing
+  h3o's `i32` return type).
+
+  May fail for cells that are very far apart or across pentagons.
+
+  ## Examples
+
+      iex> ExH3o.grid_distance(0x8928308280fffff, 0x8928308280fffff)
+      {:ok, 0}
+
+      iex> ExH3o.grid_distance(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec grid_distance(non_neg_integer(), non_neg_integer()) ::
+          {:ok, integer()} | {:error, :invalid_index | :local_ij_error}
+  defdelegate grid_distance(a, b), to: ExH3o.Native
+
+  @doc """
+  Returns the directed edge index from origin to destination.
+
+  Both cells must be neighbors (share an edge). If they are not neighbors,
+  returns `{:error, :not_neighbors}`.
+
+  ## Examples
+
+      iex> {:ok, edge} = ExH3o.get_unidirectional_edge(0x8928308280fffff, 0x8928308280bffff)
+      iex> edge > 0
+      true
+
+      iex> ExH3o.get_unidirectional_edge(0, 0x8928308280fffff)
+      {:error, :invalid_index}
+  """
+  @spec get_unidirectional_edge(non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_index | :not_neighbors}
+  defdelegate get_unidirectional_edge(origin, destination), to: ExH3o.Native
+
+  @doc """
   Returns the children cells at the given resolution.
 
   The target resolution must be finer than (greater than) or equal to the

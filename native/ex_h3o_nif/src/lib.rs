@@ -83,6 +83,31 @@ fn children<'a>(env: Env<'a>, cell: u64, resolution: u8) -> Term<'a> {
     (atoms::ok(), binary).encode(env)
 }
 
+#[rustler::nif]
+fn indices_are_neighbors(a: u64, b: u64) -> Result<bool, rustler::Atom> {
+    let a = CellIndex::try_from(a).map_err(|_| atoms::invalid_index())?;
+    let b = CellIndex::try_from(b).map_err(|_| atoms::invalid_index())?;
+    a.is_neighbor_with(b)
+        .map_err(|_| atoms::resolution_mismatch())
+}
+
+#[rustler::nif]
+fn grid_distance(a: u64, b: u64) -> Result<i32, rustler::Atom> {
+    let a = CellIndex::try_from(a).map_err(|_| atoms::invalid_index())?;
+    let b = CellIndex::try_from(b).map_err(|_| atoms::invalid_index())?;
+    a.grid_distance(b).map_err(|_| atoms::local_ij_error())
+}
+
+#[rustler::nif]
+fn get_unidirectional_edge(origin: u64, destination: u64) -> Result<u64, rustler::Atom> {
+    let origin = CellIndex::try_from(origin).map_err(|_| atoms::invalid_index())?;
+    let destination = CellIndex::try_from(destination).map_err(|_| atoms::invalid_index())?;
+    origin
+        .edge(destination)
+        .map(u64::from)
+        .ok_or(atoms::not_neighbors())
+}
+
 #[rustler::nif(schedule = "DirtyCpu")]
 fn k_ring<'a>(env: Env<'a>, cell: u64, k: u32) -> Term<'a> {
     let cell_index = match CellIndex::try_from(cell) {

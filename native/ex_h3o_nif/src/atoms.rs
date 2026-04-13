@@ -9,4 +9,5 @@ rustler::atoms! {
     local_ij_error,
     invalid_string,
     dissolution_failed,
+    not_neighbors,
 }
