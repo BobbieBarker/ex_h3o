@@ -1,7 +1,7 @@
 mod atoms;
 mod types;
 
-use h3o::{CellIndex, LatLng, Resolution};
+use h3o::{error::CompactionError, CellIndex, LatLng, Resolution};
 use rustler::sys::{enif_set_option, ErlNifOption};
 use rustler::{Encoder, Env, NewBinary, Term};
 
@@ -213,6 +213,42 @@ fn k_ring_distances<'a>(env: Env<'a>, cell: u64, k: u32) -> Term<'a> {
     }
     let binary: rustler::Binary = binary.into();
     (atoms::ok(), binary).encode(env)
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn compact<'a>(env: Env<'a>, packed: rustler::Binary) -> Term<'a> {
+    let bytes = packed.as_slice();
+    if bytes.len() % 8 != 0 {
+        return (atoms::error(), atoms::invalid_index()).encode(env);
+    }
+
+    let mut cells: Vec<CellIndex> = Vec::with_capacity(bytes.len() / 8);
+    for chunk in bytes.chunks_exact(8) {
+        let raw = u64::from_ne_bytes(chunk.try_into().unwrap());
+        match CellIndex::try_from(raw) {
+            Ok(cell) => cells.push(cell),
+            Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+        }
+    }
+
+    match CellIndex::compact(&mut cells) {
+        Ok(()) => {
+            let mut binary = NewBinary::new(env, cells.len() * 8);
+            let buf = binary.as_mut_slice();
+            for (i, c) in cells.iter().enumerate() {
+                buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+            }
+            let binary: rustler::Binary = binary.into();
+            (atoms::ok(), binary).encode(env)
+        }
+        Err(CompactionError::HeterogeneousResolution) => {
+            (atoms::error(), atoms::heterogeneous_resolution()).encode(env)
+        }
+        Err(CompactionError::DuplicateInput) => {
+            (atoms::error(), atoms::duplicate_input()).encode(env)
+        }
+        Err(_) => (atoms::error(), atoms::compaction_failed()).encode(env),
+    }
 }
 
 rustler::init!("Elixir.ExH3o.Native", load = load);

@@ -6,6 +6,8 @@ rustler::atoms! {
     invalid_resolution,
     resolution_mismatch,
     compaction_failed,
+    heterogeneous_resolution,
+    duplicate_input,
     local_ij_error,
     invalid_string,
     dissolution_failed,

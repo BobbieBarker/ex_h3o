@@ -71,5 +71,12 @@ defmodule ExH3o.Native do
     def dirty_sleep(_ms), do: :erlang.nif_error(:nif_not_loaded)
   end
 
+  @spec k_ring_distances(non_neg_integer(), non_neg_integer()) ::
+          {:ok, binary()} | {:error, :invalid_index}
   def k_ring_distances(_cell, _k), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec compact(binary()) ::
+          {:ok, binary()}
+          | {:error, :invalid_index | :heterogeneous_resolution | :duplicate_input}
+  def compact(_packed), do: :erlang.nif_error(:nif_not_loaded)
 end
