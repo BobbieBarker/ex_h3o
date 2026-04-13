@@ -354,6 +354,40 @@ defmodule ExH3oTest do
     end
   end
 
+  describe "max_k_ring_size/1" do
+    test "k=0 returns 1" do
+      assert {:ok, 1} = ExH3o.max_k_ring_size(0)
+    end
+
+    test "k=1 returns 7" do
+      assert {:ok, 7} = ExH3o.max_k_ring_size(1)
+    end
+
+    test "k=2 returns 19" do
+      assert {:ok, 19} = ExH3o.max_k_ring_size(2)
+    end
+
+    test "k=3 returns 37" do
+      assert {:ok, 37} = ExH3o.max_k_ring_size(3)
+    end
+
+    test "matches formula 3k² + 3k + 1 for k=0..100" do
+      for k <- 0..100 do
+        expected = 3 * k * k + 3 * k + 1
+        assert {:ok, ^expected} = ExH3o.max_k_ring_size(k), "failed for k=#{k}"
+      end
+    end
+
+    test "returns error for negative k" do
+      assert {:error, :invalid_k} = ExH3o.max_k_ring_size(-1)
+    end
+
+    test "returns error for non-integer k" do
+      assert {:error, :invalid_k} = ExH3o.max_k_ring_size(1.5)
+      assert {:error, :invalid_k} = ExH3o.max_k_ring_size("2")
+    end
+  end
+
   describe "from_string/1" do
     test "parses valid hex string to cell index" do
       assert {:ok, @valid_cell} = ExH3o.from_string("8928308280fffff")
@@ -390,6 +424,179 @@ defmodule ExH3oTest do
                    ExH3o.from_string(hex) |> then(fn {:ok, c} -> ExH3o.to_string(c) end)
         end
       end
+    end
+  end
+
+  describe "num_hexagons/1" do
+    @num_hexagons_by_res %{
+      0 => 122,
+      1 => 842,
+      2 => 5882,
+      3 => 41_162,
+      4 => 288_122,
+      5 => 2_016_842,
+      6 => 14_117_882,
+      7 => 98_825_162,
+      8 => 691_776_122,
+      9 => 4_842_432_842,
+      10 => 33_897_029_882,
+      11 => 237_279_209_162,
+      12 => 1_660_954_464_122,
+      13 => 11_626_681_248_842,
+      14 => 81_386_768_741_882,
+      15 => 569_707_381_193_162
+    }
+
+    test "returns correct count for all 16 resolutions" do
+      for {res, expected} <- @num_hexagons_by_res do
+        assert {:ok, ^expected} = ExH3o.num_hexagons(res), "failed for res=#{res}"
+      end
+    end
+
+    test "returns error for resolution -1" do
+      assert {:error, :invalid_resolution} = ExH3o.num_hexagons(-1)
+    end
+
+    test "returns error for resolution 16" do
+      assert {:error, :invalid_resolution} = ExH3o.num_hexagons(16)
+    end
+  end
+
+  describe "edge_length_kilometers/1" do
+    test "resolution 0 is approximately 1281 km" do
+      assert {:ok, length} = ExH3o.edge_length_kilometers(0)
+      assert_in_delta length, 1281.256011, 0.001
+    end
+
+    test "resolution 15 is sub-meter" do
+      assert {:ok, length} = ExH3o.edge_length_kilometers(15)
+      assert length < 0.001
+    end
+
+    test "returns error for invalid resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.edge_length_kilometers(-1)
+      assert {:error, :invalid_resolution} = ExH3o.edge_length_kilometers(16)
+    end
+
+    test "lengths decrease monotonically with resolution" do
+      lengths =
+        for res <- 0..15 do
+          {:ok, length} = ExH3o.edge_length_kilometers(res)
+          length
+        end
+
+      for [a, b] <- Enum.chunk_every(lengths, 2, 1, :discard) do
+        assert a > b
+      end
+    end
+  end
+
+  describe "edge_length_meters/1" do
+    test "resolution 0 is approximately 1,281,256 m" do
+      assert {:ok, length} = ExH3o.edge_length_meters(0)
+      assert_in_delta length, 1_281_256.011, 0.01
+    end
+
+    test "values are 1000x the km values" do
+      for res <- 0..15 do
+        {:ok, km} = ExH3o.edge_length_kilometers(res)
+        {:ok, m} = ExH3o.edge_length_meters(res)
+        assert_in_delta m, km * 1000, 0.01, "failed for res=#{res}"
+      end
+    end
+
+    test "returns error for invalid resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.edge_length_meters(-1)
+      assert {:error, :invalid_resolution} = ExH3o.edge_length_meters(16)
+    end
+  end
+
+  describe "hex_area_km2/1" do
+    test "resolution 0 is approximately 4.36 million km²" do
+      assert {:ok, area} = ExH3o.hex_area_km2(0)
+      assert_in_delta area, 4_357_449.416, 0.001
+    end
+
+    test "resolution 15 is sub-square-meter" do
+      assert {:ok, area} = ExH3o.hex_area_km2(15)
+      assert area < 0.000001
+    end
+
+    test "returns error for invalid resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.hex_area_km2(-1)
+      assert {:error, :invalid_resolution} = ExH3o.hex_area_km2(16)
+    end
+
+    test "areas decrease monotonically with resolution" do
+      areas =
+        for res <- 0..15 do
+          {:ok, area} = ExH3o.hex_area_km2(res)
+          area
+        end
+
+      for [a, b] <- Enum.chunk_every(areas, 2, 1, :discard) do
+        assert a > b
+      end
+    end
+  end
+
+  describe "hex_area_m2/1" do
+    test "resolution 0 is approximately 4.36 trillion m²" do
+      assert {:ok, area} = ExH3o.hex_area_m2(0)
+      assert_in_delta area, 4_357_449_416_078.39, 0.1
+    end
+
+    test "values are 1_000_000x the km² values" do
+      for res <- 0..15 do
+        {:ok, km2} = ExH3o.hex_area_km2(res)
+        {:ok, m2} = ExH3o.hex_area_m2(res)
+        assert_in_delta m2, km2 * 1_000_000, 0.1, "failed for res=#{res}"
+      end
+    end
+
+    test "returns error for invalid resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.hex_area_m2(-1)
+      assert {:error, :invalid_resolution} = ExH3o.hex_area_m2(16)
+    end
+  end
+
+  describe "get_res0_indexes/0" do
+    test "returns exactly 122 cells" do
+      cells = ExH3o.get_res0_indexes()
+      assert length(cells) == 122
+    end
+
+    test "all cells are valid H3 indices" do
+      cells = ExH3o.get_res0_indexes()
+
+      Enum.each(cells, fn cell ->
+        assert ExH3o.is_valid(cell), "cell #{Integer.to_string(cell, 16)} is not valid"
+      end)
+    end
+
+    test "all cells are at resolution 0" do
+      cells = ExH3o.get_res0_indexes()
+
+      Enum.each(cells, fn cell ->
+        assert {:ok, 0} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "base cell numbers cover 0..121" do
+      cells = ExH3o.get_res0_indexes()
+
+      base_cells =
+        Enum.map(cells, fn cell ->
+          {:ok, bc} = ExH3o.get_base_cell(cell)
+          bc
+        end)
+
+      assert Enum.sort(base_cells) == Enum.to_list(0..121)
+    end
+
+    test "all cells are unique" do
+      cells = ExH3o.get_res0_indexes()
+      assert length(Enum.uniq(cells)) == 122
     end
   end
 

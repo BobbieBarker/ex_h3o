@@ -1,0 +1,475 @@
+name: Claude Review
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: claude-review-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  # Shared setup: resolve PR number, check skip conditions
+  resolve-pr:
+    name: Resolve PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    if: >-
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.pull_requests[0] != null
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+      head_branch: ${{ steps.pr.outputs.head_branch }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      should_review: ${{ steps.conditions.outputs.should_review }}
+      should_fix: ${{ steps.conditions.outputs.should_fix }}
+      ci_conclusion: ${{ steps.pr.outputs.ci_conclusion }}
+    steps:
+      - name: Resolve PR number and metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Try workflow_run.pull_requests first (faster), fall back to API
+          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls \
+              --jq '.[0].number' 2>/dev/null || echo "")
+          fi
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for this workflow run — skipping"
+            echo "number=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "head_branch=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
+          echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          echo "ci_conclusion=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
+
+      - name: Check skip conditions
+        id: conditions
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+        run: |
+          should_review=false
+          should_fix=false
+
+          # Skip bot PRs
+          if [[ "$HEAD_BRANCH" == claude/* ]] || [[ "$HEAD_BRANCH" == dependabot/* ]]; then
+            echo "Skipping: bot branch ($HEAD_BRANCH)"
+            echo "should_review=false" >> $GITHUB_OUTPUT
+            echo "should_fix=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Skip bot actors
+          if [ "$ACTOR" = "github-actions[bot]" ] || [ "$ACTOR" = "claude[bot]" ]; then
+            echo "Skipping: bot actor ($ACTOR)"
+            echo "should_review=false" >> $GITHUB_OUTPUT
+            echo "should_fix=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check labels
+          HAS_REVIEWED_LABEL=$(gh api repos/${{ github.repository }}/issues/$PR_NUMBER/labels \
+            --jq '[.[] | select(.name == "claude-reviewed")] | length > 0' 2>/dev/null || echo "false")
+
+          if [ "$CI_CONCLUSION" = "success" ] && [ "$HAS_REVIEWED_LABEL" != "true" ]; then
+            should_review=true
+          fi
+
+          # Fix can run on failure even if already reviewed
+          if [ "$CI_CONCLUSION" = "failure" ]; then
+            should_fix=true
+          fi
+
+          echo "should_review=$should_review" >> $GITHUB_OUTPUT
+          echo "should_fix=$should_fix" >> $GITHUB_OUTPUT
+
+  # === REVIEW JOB (CI succeeded) ===
+  review:
+    name: Claude Review
+    needs: resolve-pr
+    if: needs.resolve-pr.outputs.should_review == 'true'
+    runs-on: []
+    timeout-minutes: 30
+    env:
+      ImageOS: ubuntu24
+      PR_NUMBER: ${{ needs.resolve-pr.outputs.pr_number }}
+      REPO_FULL_NAME: ${{ github.repository }}
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-pr.outputs.head_branch }}
+          fetch-depth: 20
+
+      - name: Detect changed file types
+        id: detect_langs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh pr diff "$PR_NUMBER" --name-only)
+          has_elixir=false
+          has_ts=false
+          if echo "$files" | grep -qE '\.(ex|exs)$'; then has_elixir=true; fi
+          if echo "$files" | grep -qE '\.(ts|tsx)$'; then has_ts=true; fi
+          echo "has_elixir=$has_elixir" >> $GITHUB_OUTPUT
+          echo "has_ts=$has_ts" >> $GITHUB_OUTPUT
+          echo "Detected: elixir=$has_elixir ts=$has_ts"
+
+      # --- Elixir reviewer ---
+      - name: Write Elixir review prompt
+        id: write_elixir_review
+        if: steps.detect_langs.outputs.has_elixir == 'true'
+        run: |
+          cat > /tmp/elixir-review-prompt.txt << 'PROMPT_EOF'
+          You are a code reviewer for an Elixir/Phoenix umbrella project.
+          Only review `.ex` and `.exs` files — skip any `.ts`/`.tsx` files in the diff.
+
+          Read the CLAUDE.md file at the repo root for the full project conventions.
+
+          Review the PR. The PR number is in the $PR_NUMBER env var and the repo is in $REPO_FULL_NAME.
+
+          ## Step 1: Get the diff
+
+          Run: `gh pr diff $PR_NUMBER`
+
+          ## Step 2: Read changed files
+
+          For each changed `.ex`/`.exs` file in the diff, read the full file to understand context around the changes.
+
+          ## Step 3: Check for convention violations
+
+          Check every changed Elixir file against the rules documented in CLAUDE.md.
+
+          These rules are NOT enforced by CI (Credo/formatter) and require manual review:
+
+          
+
+          **Do NOT flag (already enforced by CI):**
+          - Formatting issues (`mix format`)
+          - `@moduledoc` presence (`Credo.Check.Readability.ModuleDoc`)
+          - `@spec` on public functions (`Credo.Check.Readability.Specs`)
+          - Nested control flow (`Credo.Check.Refactor.Nesting`)
+          - Files in `.github/workflows/` or CLAUDE.md
+          - Missing docs/specs on code that wasn't changed in this PR
+          - Subjective style preferences not covered by the rules above
+
+          ## Step 4: Submit review
+
+          Build a JSON review payload and submit via the GitHub API.
+          Only comment on lines that are part of the PR diff.
+
+          If you found convention violations, submit a REQUEST_CHANGES review:
+
+          ```bash
+          gh api repos/$REPO_FULL_NAME/pulls/$PR_NUMBER/reviews \
+            --method POST --input - << 'REVIEW_EOF'
+          {
+            "event": "REQUEST_CHANGES",
+            "body": "[Elixir] Found N convention violation(s). See inline comments for details.\n\nTo auto-fix, reply to this review with: `@claude fix the issues noted in this review`",
+            "comments": [
+              {
+                "path": "relative/path/to/file.ex",
+                "line": 42,
+                "body": "**Convention violated:** Description.\n\n**Fix:** What to change."
+              }
+            ]
+          }
+          REVIEW_EOF
+          ```
+
+          If no violations found, approve the PR:
+
+          ```bash
+          gh pr review $PR_NUMBER --approve --body "[Elixir] Code review passed — no convention violations found."
+          ```
+
+          IMPORTANT:
+          - Only review `.ex` and `.exs` files — completely ignore `.ts`/`.tsx` files
+          - Only flag clear, objective convention violations from the list above
+          - Each comment must name the specific convention being violated
+          - Line numbers must be actual file line numbers within the diff
+          - Do NOT modify any files — this is a read-only review
+          PROMPT_EOF
+
+      - name: Elixir review with Claude
+        id: elixir_review
+        if: steps.write_elixir_review.outcome == 'success'
+        timeout-minutes: 15
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npx -y @anthropic-ai/claude-code@latest \
+            --print \
+            --model claude-sonnet-4-6 \
+            --max-turns 12 \
+            --allowedTools "Read,Glob,Grep,Bash(gh:*),Bash(git:*)" \
+            < /tmp/elixir-review-prompt.txt
+
+      
+
+      # --- Post-review: check if fixes needed ---
+      - name: Check if fixes are needed
+        id: check_fixes
+        if: steps.elixir_review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          HAS_CHANGES_REQUESTED=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews \
+            --jq '[.[] | select(.user.login == "github-actions[bot]" and .state == "CHANGES_REQUESTED")] | length > 0' 2>/dev/null || echo "false")
+          if [ "$HAS_CHANGES_REQUESTED" = "true" ]; then
+            echo "needs_fix=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_fix=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Label PR as reviewed
+        if: steps.elixir_review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr edit $PR_NUMBER --add-label "claude-reviewed"
+
+      # --- Fix review issues ---
+      - name: Switch to PR branch for review fix
+        if: steps.check_fixes.outputs.needs_fix == 'true'
+        env:
+          CI_PAT: ${{ secrets.CI_PAT }}
+        run: |
+          git remote set-url origin "https://x-access-token:${CI_PAT}@github.com/${{ github.repository }}.git"
+          git fetch origin "${{ needs.resolve-pr.outputs.head_branch }}"
+          git checkout -B "${{ needs.resolve-pr.outputs.head_branch }}" "origin/${{ needs.resolve-pr.outputs.head_branch }}"
+
+      - name: Write review fix prompt
+        if: steps.check_fixes.outputs.needs_fix == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REVIEW_ID=$(gh api repos/$REPO_FULL_NAME/pulls/$PR_NUMBER/reviews --jq 'last | .id')
+          gh api repos/$REPO_FULL_NAME/pulls/$PR_NUMBER/reviews --jq 'last | .body' > /tmp/review-body.txt
+          gh api repos/$REPO_FULL_NAME/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments --jq '[.[] | {path, line, body}]' > /tmp/review-comments.json
+
+          cat > /tmp/fix-prompt.txt << 'PROMPT_EOF'
+          A code review was just submitted on this PR requesting changes.
+
+          Read the CLAUDE.md file at the repo root for project conventions.
+
+          Review summary:
+          PROMPT_EOF
+
+          cat /tmp/review-body.txt >> /tmp/fix-prompt.txt
+
+          cat >> /tmp/fix-prompt.txt << 'PROMPT_EOF'
+
+          Review comments (JSON):
+          PROMPT_EOF
+
+          cat /tmp/review-comments.json >> /tmp/fix-prompt.txt
+
+          cat >> /tmp/fix-prompt.txt << 'PROMPT_EOF'
+
+          For each review comment:
+          1. Read the file at the path mentioned
+          2. Fix the convention violation described at the specified line
+          3. Ensure the fix follows CLAUDE.md conventions
+
+          After fixing all issues, verify your changes compile and pass checks.
+
+          For Elixir files (.ex/.exs):
+          
+
+          
+
+          Then stage only the files you changed and amend the existing commit (do NOT create a new commit — one commit per PR):
+          git add <changed files>
+          git commit --amend --no-edit
+          git push --force-with-lease
+
+          Do NOT modify files in .github/workflows/ or CLAUDE.md.
+          PROMPT_EOF
+
+      - name: Fix review issues with Claude
+        id: fix_review
+        if: steps.check_fixes.outputs.needs_fix == 'true'
+        timeout-minutes: 20
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npx -y @anthropic-ai/claude-code@latest \
+            --print \
+            --model claude-sonnet-4-6 \
+            --max-turns 20 \
+            --allowedTools "Edit,Read,Write,Glob,Grep,Bash(mix:*),Bash(git:*),Bash(gh:*),Bash(elixir:*),Bash(iex:*),Bash(:*),Bash(npx:*),Bash(cd:*)" \
+            < /tmp/fix-prompt.txt
+
+      - name: Label PR as fixed (review)
+        if: steps.fix_review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr edit $PR_NUMBER --add-label "fixed"
+
+  # === FIX JOB (CI failed) ===
+  fix:
+    name: Claude Fix
+    needs: resolve-pr
+    if: needs.resolve-pr.outputs.should_fix == 'true'
+    runs-on: []
+    timeout-minutes: 30
+    env:
+      ImageOS: ubuntu24
+      PR_NUMBER: ${{ needs.resolve-pr.outputs.pr_number }}
+      REPO_FULL_NAME: ${{ github.repository }}
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-pr.outputs.head_branch }}
+          fetch-depth: 20
+
+      - name: Configure git for push
+        env:
+          CI_PAT: ${{ secrets.CI_PAT }}
+        run: |
+          git remote set-url origin "https://x-access-token:${CI_PAT}@github.com/${{ github.repository }}.git"
+
+      - name: Query failed CI jobs
+        id: failed_jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FAILED_JOBS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(",")')
+          echo "names=$FAILED_JOBS" >> $GITHUB_OUTPUT
+          echo "Failed jobs: $FAILED_JOBS"
+
+      - name: Download uncovered-lines artifact (if coverage failed)
+        id: download_coverage
+        if: contains(steps.failed_jobs.outputs.names, 'Coverage')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACT_URL=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts \
+            --jq '.artifacts[] | select(.name == "uncovered-lines") | .archive_download_url' 2>/dev/null || echo "")
+
+          if [ -n "$ARTIFACT_URL" ] && [ "$ARTIFACT_URL" != "null" ]; then
+            curl -L -H "Authorization: token $GH_TOKEN" "$ARTIFACT_URL" -o /tmp/uncovered.zip
+            unzip -o /tmp/uncovered.zip -d /tmp/
+            echo "has_uncovered=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_uncovered=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get CI run logs for failure context
+        id: ci_logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the failed job steps' error output for context
+          gh api repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs \
+            --jq '.jobs[] | select(.conclusion == "failure") | {name, steps: [.steps[] | select(.conclusion == "failure") | {name, conclusion}]}' \
+            > /tmp/failed-steps.json 2>/dev/null || true
+
+      - name: Write CI fix prompt
+        env:
+          FAILED_JOBS: ${{ steps.failed_jobs.outputs.names }}
+          HAS_UNCOVERED: ${{ steps.download_coverage.outputs.has_uncovered }}
+        run: |
+          cat > /tmp/fix-prompt.txt << 'PROMPT_EOF'
+          CI checks failed on this branch.
+
+          Read the CLAUDE.md file at the repo root for project conventions and architecture context.
+          Follow all conventions described there when making fixes.
+          PROMPT_EOF
+
+          echo "" >> /tmp/fix-prompt.txt
+          echo "The following CI jobs failed: $FAILED_JOBS" >> /tmp/fix-prompt.txt
+          echo "" >> /tmp/fix-prompt.txt
+          echo "Map these to fix instructions:" >> /tmp/fix-prompt.txt
+
+          # Map failed job names to fix instructions
+          IFS=',' read -ra JOBS <<< "$FAILED_JOBS"
+          for job in "${JOBS[@]}"; do
+            case "$job" in
+              *Lint*|*lint*)
+                echo "- Lint: " >> /tmp/fix-prompt.txt
+                ;;
+              
+              *Coverage*|*coverage*|*CI*)
+                # The CI job includes coverage — check if uncovered lines were downloaded
+                if [ "$HAS_UNCOVERED" = "true" ] && [ -f /tmp/uncovered-lines.txt ]; then
+                  echo "- Coverage: Patch coverage below 90% threshold." >> /tmp/fix-prompt.txt
+                  echo "" >> /tmp/fix-prompt.txt
+                  echo "Uncovered lines that need tests:" >> /tmp/fix-prompt.txt
+                  cat /tmp/uncovered-lines.txt >> /tmp/fix-prompt.txt
+                  echo "" >> /tmp/fix-prompt.txt
+                  cat >> /tmp/fix-prompt.txt << 'COVERAGE_EOF'
+
+          Coverage fix guidelines:
+          - Write tests that verify BEHAVIOR, not just execute lines. Every test must assert on a meaningful outcome.
+          - BAD: `test "covers line 42" do MyModule.some_function(%{}) end` (executes but asserts nothing)
+          - GOOD: `test "returns error for invalid input" do assert {:error, %ErrorMessage{code: :unprocessable_entity}} = MyModule.some_function(%{invalid: true}) end`
+          - Each uncovered line above tells you a code path that lacks test coverage. Write a test that exercises that path AND verifies the result.
+          - If the uncovered line is in a function with multiple clauses, test the specific clause that matches.
+          - If the uncovered line is unreachable infrastructure (e.g., release tasks, migration helpers), add it to codecov.yml ignore instead of writing a meaningless test.
+          COVERAGE_EOF
+                else
+                  echo "- CI job failed — re-run the failing checks to see error output" >> /tmp/fix-prompt.txt
+                fi
+                ;;
+            esac
+          done
+
+          cat >> /tmp/fix-prompt.txt << 'PROMPT_EOF'
+
+          Re-run the failing check(s) to see the error output, diagnose the issue, fix the code,
+          then verify ALL checks pass.
+
+          For Elixir:
+          
+
+          
+
+          Then amend the existing commit (do NOT create a new commit — one commit per PR):
+          git add <changed files>
+          git commit --amend --no-edit
+          git push --force-with-lease
+
+          Do NOT modify files in .github/workflows/ or CLAUDE.md.
+          PROMPT_EOF
+
+      - name: Fix CI failures with Claude
+        id: fix_ci
+        timeout-minutes: 20
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npx -y @anthropic-ai/claude-code@latest \
+            --print \
+            --model claude-sonnet-4-6 \
+            --max-turns 20 \
+            --allowedTools "Edit,Read,Write,Glob,Grep,Bash(mix:*),Bash(git:*),Bash(gh:*),Bash(elixir:*),Bash(iex:*),Bash(:*),Bash(npx:*),Bash(cd:*)" \
+            < /tmp/fix-prompt.txt
+
+      - name: Label PR as fixed (CI)
+        if: steps.fix_ci.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr edit $PR_NUMBER --add-label "fixed"
