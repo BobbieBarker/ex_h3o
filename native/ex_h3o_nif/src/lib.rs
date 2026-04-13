@@ -1,3 +1,6 @@
+mod atoms;
+mod types;
+
 use h3o::CellIndex;
 
 #[rustler::nif]
