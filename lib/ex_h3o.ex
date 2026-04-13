@@ -529,4 +529,18 @@ defmodule ExH3o do
         error
     end
   end
+
+  def k_ring_distances(cell, k) do
+    case ExH3o.Native.k_ring_distances(cell, k) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok,
+         for(
+           <<index::native-unsigned-64, distance::native-unsigned-64 <- packed>>,
+           do: {index, distance}
+         )}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 end
