@@ -530,6 +530,41 @@ defmodule ExH3o do
     end
   end
 
+  @doc """
+  Compacts a set of H3 cell indices by replacing complete child sets with
+  their parent cell, applied recursively.
+
+  All input cells must be at the same resolution and unique. Returns the
+  minimal set of cells that covers the same area.
+
+  ## Examples
+
+      iex> {:ok, children} = ExH3o.children(0x8928308280fffff, 10)
+      iex> {:ok, compacted} = ExH3o.compact(children)
+      iex> compacted
+      [0x8928308280fffff]
+
+      iex> ExH3o.compact([])
+      {:ok, []}
+  """
+  @spec compact([non_neg_integer()]) ::
+          {:ok, [non_neg_integer()]} | {:error, :heterogeneous_resolution | :duplicate_input}
+  def compact(cells) when is_list(cells) do
+    packed = pack_cells(cells)
+
+    case ExH3o.Native.compact(packed) do
+      {:ok, result} when is_binary(result) ->
+        {:ok, for(<<index::native-unsigned-64 <- result>>, do: index)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp pack_cells(cells) do
+    for cell <- cells, into: <<>>, do: <<cell::native-unsigned-64>>
+  end
+
   def k_ring_distances(cell, k) do
     case ExH3o.Native.k_ring_distances(cell, k) do
       {:ok, packed} when is_binary(packed) ->

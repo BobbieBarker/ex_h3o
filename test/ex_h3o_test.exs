@@ -984,6 +984,93 @@ defmodule ExH3oTest do
     end
   end
 
+  describe "compact/1" do
+    @tag :pending_uncompact
+    test "compact then uncompact roundtrips to original set" do
+      {:ok, children} = ExH3o.children(@valid_cell, 10)
+      assert {:ok, compacted} = ExH3o.compact(children)
+
+      # Uncompact back to res 10 to verify roundtrip
+      {:ok, uncompacted} = ExH3o.uncompact(compacted, 10)
+      assert Enum.sort(uncompacted) == Enum.sort(children)
+    end
+
+    test "compact of already-compact set is idempotent" do
+      {:ok, children} = ExH3o.children(@valid_cell, 10)
+      assert {:ok, compacted} = ExH3o.compact(children)
+      assert {:ok, recompacted} = ExH3o.compact(compacted)
+      assert Enum.sort(recompacted) == Enum.sort(compacted)
+    end
+
+    test "mixed resolutions return {:error, :heterogeneous_resolution}" do
+      {:ok, children_10} = ExH3o.children(@valid_cell, 10)
+      {:ok, children_11} = ExH3o.children(@valid_cell, 11)
+      mixed = Enum.take(children_10, 1) ++ Enum.take(children_11, 1)
+      assert {:error, :heterogeneous_resolution} = ExH3o.compact(mixed)
+    end
+
+    test "duplicates return {:error, :duplicate_input}" do
+      {:ok, children} = ExH3o.children(@valid_cell, 10)
+      duplicated = children ++ Enum.take(children, 1)
+      assert {:error, :duplicate_input} = ExH3o.compact(duplicated)
+    end
+
+    test "compact of a single cell returns that cell" do
+      assert {:ok, [@valid_cell]} = ExH3o.compact([@valid_cell])
+    end
+
+    test "compact of empty list returns empty list" do
+      assert {:ok, []} = ExH3o.compact([])
+    end
+
+    test "all compacted cells are valid H3 indices" do
+      {:ok, children} = ExH3o.children(@valid_cell, 10)
+      {:ok, compacted} = ExH3o.compact(children)
+
+      Enum.each(compacted, fn cell ->
+        assert ExH3o.is_valid(cell)
+      end)
+    end
+
+    test "compacted set is smaller or equal in size" do
+      {:ok, children} = ExH3o.children(@valid_cell, 10)
+      {:ok, compacted} = ExH3o.compact(children)
+      assert length(compacted) <= length(children)
+    end
+  end
+
+  # uncompact/2 is not yet implemented — tests tagged :pending_uncompact
+  describe "uncompact/2" do
+    @tag :pending_uncompact
+    test "uncompact expands to correct resolution" do
+      {:ok, uncompacted} = ExH3o.uncompact([@valid_cell], 10)
+
+      Enum.each(uncompacted, fn cell ->
+        assert {:ok, 10} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    @tag :pending_uncompact
+    test "uncompact at same resolution returns identity" do
+      assert {:ok, [@valid_cell]} = ExH3o.uncompact([@valid_cell], 9)
+    end
+
+    @tag :pending_uncompact
+    test "uncompact of empty list returns empty list" do
+      assert {:ok, []} = ExH3o.uncompact([], 5)
+    end
+
+    @tag :pending_uncompact
+    test "returns {:error, :invalid_resolution} for coarser resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.uncompact([@valid_cell], 8)
+    end
+
+    @tag :pending_uncompact
+    test "returns {:error, :invalid_resolution} for resolution > 15" do
+      assert {:error, :invalid_resolution} = ExH3o.uncompact([@valid_cell], 16)
+    end
+  end
+
   describe "k_ring_distances/2" do
     test "k=0 returns only {cell, 0}" do
       assert {:ok, [{cell, 0}]} = ExH3o.k_ring_distances(@valid_cell, 0)

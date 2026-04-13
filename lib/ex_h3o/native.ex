@@ -72,4 +72,9 @@ defmodule ExH3o.Native do
   end
 
   def k_ring_distances(_cell, _k), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec compact(binary()) ::
+          {:ok, binary()}
+          | {:error, :invalid_index | :heterogeneous_resolution | :duplicate_input}
+  def compact(_packed), do: :erlang.nif_error(:nif_not_loaded)
 end
