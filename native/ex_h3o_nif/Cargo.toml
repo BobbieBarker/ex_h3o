@@ -1,0 +1,13 @@
+[package]
+name = "ex_h3o_nif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ex_h3o_nif"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"
+h3o = { version = "0.9", features = ["geo"] }

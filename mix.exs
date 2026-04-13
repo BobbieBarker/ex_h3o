@@ -8,7 +8,7 @@ defmodule ExH3o.MixProject do
     [
       app: :ex_h3o,
       version: @version,
-      elixir: "~> 1.19",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       dialyzer: dialyzer(),
@@ -42,6 +42,7 @@ defmodule ExH3o.MixProject do
 
   defp deps do
     [
+      {:rustler, "~> 0.37", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
