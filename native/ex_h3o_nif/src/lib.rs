@@ -1,7 +1,7 @@
 mod atoms;
 mod types;
 
-use h3o::{error::CompactionError, CellIndex, LatLng, Resolution};
+use h3o::{error::CompactionError, geom, CellIndex, LatLng, Resolution};
 use rustler::sys::{enif_set_option, ErlNifOption};
 use rustler::{Encoder, Env, NewBinary, Term};
 
@@ -281,6 +281,45 @@ fn uncompact<'a>(env: Env<'a>, packed: rustler::Binary, resolution: u8) -> Term<
     let mut binary = NewBinary::new(env, result.len() * 8);
     let buf = binary.as_mut_slice();
     for (i, c) in result.iter().enumerate() {
+        buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn polyfill<'a>(env: Env<'a>, vertices: Vec<(f64, f64)>, resolution: u8) -> Term<'a> {
+    let res = match Resolution::try_from(resolution) {
+        Ok(r) => r,
+        Err(_) => return (atoms::error(), atoms::invalid_resolution()).encode(env),
+    };
+
+    if vertices.len() < 3 {
+        return (atoms::error(), atoms::invalid_geometry()).encode(env);
+    }
+
+    // Convert (lat, lng) tuples to geo_types::Coord (x=lng, y=lat)
+    let coords: Vec<geo_types::Coord<f64>> = vertices
+        .iter()
+        .map(|(lat, lng)| geo_types::coord! { x: *lng, y: *lat })
+        .collect();
+
+    let line_string = geo_types::LineString::new(coords);
+    let polygon = geo_types::Polygon::new(line_string, vec![]);
+
+    let mut tiler = geom::TilerBuilder::new(res)
+        .containment_mode(geom::ContainmentMode::ContainsCentroid)
+        .build();
+
+    match tiler.add(polygon) {
+        Ok(()) => {}
+        Err(_) => return (atoms::error(), atoms::invalid_geometry()).encode(env),
+    }
+
+    let cells: Vec<CellIndex> = tiler.into_coverage().collect();
+    let mut binary = NewBinary::new(env, cells.len() * 8);
+    let buf = binary.as_mut_slice();
+    for (i, c) in cells.iter().enumerate() {
         buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
     }
     let binary: rustler::Binary = binary.into();

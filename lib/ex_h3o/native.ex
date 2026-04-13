@@ -81,4 +81,8 @@ defmodule ExH3o.Native do
   @spec uncompact(binary(), non_neg_integer()) ::
           {:ok, binary()} | {:error, :invalid_index | :invalid_resolution}
   def uncompact(_packed, _resolution), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec polyfill([{float(), float()}], non_neg_integer()) ::
+          {:ok, binary()} | {:error, :invalid_geometry | :invalid_resolution}
+  def polyfill(_vertices, _resolution), do: :erlang.nif_error(:nif_not_loaded)
 end

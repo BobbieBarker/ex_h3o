@@ -606,6 +606,49 @@ defmodule ExH3o do
     end
   end
 
+  @doc """
+  Returns the H3 cell indices whose centroids fall within the given polygon
+  at the specified resolution.
+
+  The polygon is specified as a list of `{lat, lng}` vertex tuples in degrees.
+  The polygon is automatically closed if the last vertex does not equal the
+  first. At least 3 distinct vertices are required.
+
+  Uses `ContainsCentroid` containment mode (cells whose centroids fall inside
+  the polygon are included).
+
+  ## Examples
+
+      iex> polygon = [{37.77, -122.42}, {37.77, -122.41}, {37.78, -122.41}, {37.78, -122.42}]
+      iex> {:ok, cells} = ExH3o.polyfill(polygon, 9)
+      iex> length(cells) > 0
+      true
+
+      iex> ExH3o.polyfill([{0.0, 0.0}], 5)
+      {:error, :invalid_geometry}
+
+      iex> polygon = [{37.77, -122.42}, {37.77, -122.41}, {37.78, -122.41}, {37.78, -122.42}]
+      iex> ExH3o.polyfill(polygon, 16)
+      {:error, :invalid_resolution}
+  """
+  @spec polyfill([{float(), float()}], non_neg_integer()) ::
+          {:ok, [non_neg_integer()]} | {:error, :invalid_geometry | :invalid_resolution}
+  def polyfill(vertices, resolution)
+      when is_list(vertices) and is_integer(resolution) and resolution in 0..15 do
+    case ExH3o.Native.polyfill(vertices, resolution) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok, for(<<index::native-unsigned-64 <- packed>>, do: index)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def polyfill(_vertices, resolution) when is_integer(resolution),
+    do: {:error, :invalid_resolution}
+
+  def polyfill(_vertices, _resolution), do: {:error, :invalid_geometry}
+
   def k_ring_distances(cell, k) do
     case ExH3o.Native.k_ring_distances(cell, k) do
       {:ok, packed} when is_binary(packed) ->

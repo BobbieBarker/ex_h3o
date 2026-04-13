@@ -12,4 +12,5 @@ rustler::atoms! {
     invalid_string,
     dissolution_failed,
     not_neighbors,
+    invalid_geometry,
 }
