@@ -1,7 +1,7 @@
 mod atoms;
 mod types;
 
-use h3o::CellIndex;
+use h3o::{CellIndex, Resolution};
 use rustler::sys::{enif_set_option, ErlNifOption};
 
 #[rustler::nif]
@@ -31,6 +31,16 @@ fn is_pentagon(cell: u64) -> Result<bool, rustler::Atom> {
 fn is_class3(cell: u64) -> Result<bool, rustler::Atom> {
     let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
     Ok(cell.resolution().is_class3())
+}
+
+#[rustler::nif]
+fn parent(cell: u64, resolution: u8) -> Result<u64, rustler::Atom> {
+    let cell_index = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    let res = Resolution::try_from(resolution).map_err(|_| atoms::invalid_resolution())?;
+    cell_index
+        .parent(res)
+        .map(u64::from)
+        .ok_or(atoms::invalid_resolution())
 }
 
 /// Dirty CPU NIF that sleeps for `ms` milliseconds and returns `:ok`.

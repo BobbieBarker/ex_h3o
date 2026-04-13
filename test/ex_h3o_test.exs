@@ -161,4 +161,65 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "parent/2" do
+    test "returns parent at coarser resolution" do
+      assert {:ok, parent_cell} = ExH3o.parent(@valid_cell, 8)
+      assert {:ok, 8} = ExH3o.get_resolution(parent_cell)
+    end
+
+    test "identity: parent at same resolution returns self" do
+      assert {:ok, @valid_cell} = ExH3o.parent(@valid_cell, 9)
+    end
+
+    test "chain: transitive parent lookup" do
+      assert {:ok, parent_8} = ExH3o.parent(@valid_cell, 8)
+      assert {:ok, parent_7_via_8} = ExH3o.parent(parent_8, 7)
+      assert {:ok, parent_7_direct} = ExH3o.parent(@valid_cell, 7)
+      assert parent_7_via_8 == parent_7_direct
+    end
+
+    test "returns error for finer resolution than cell" do
+      assert {:error, :invalid_resolution} = ExH3o.parent(@valid_cell, 10)
+    end
+
+    test "identity: res 0 cell at resolution 0 returns self" do
+      assert {:ok, @pentagon_cell} = ExH3o.parent(@pentagon_cell, 0)
+    end
+
+    test "returns error for invalid cell index" do
+      assert {:error, :invalid_index} = ExH3o.parent(@zero, 5)
+    end
+
+    test "returns error for resolution out of range" do
+      assert {:error, :invalid_resolution} = ExH3o.parent(@valid_cell, 16)
+    end
+
+    test "returns error for garbage cell" do
+      assert {:error, :invalid_index} = ExH3o.parent(@garbage, 5)
+    end
+
+    property "parent at coarser resolution has the target resolution" do
+      check all(cell <- non_negative_integer()) do
+        with {:ok, res} when res > 0 <- ExH3o.get_resolution(cell),
+             {:ok, parent} <- ExH3o.parent(cell, res - 1) do
+          assert {:ok, target} = ExH3o.get_resolution(parent)
+          assert target == res - 1
+        end
+      end
+    end
+
+    property "returns {:ok, _} or {:error, :invalid_index | :invalid_resolution} for any inputs" do
+      check all(
+              cell <- non_negative_integer(),
+              res <- integer(0..15)
+            ) do
+        case ExH3o.parent(cell, res) do
+          {:ok, parent} -> assert is_integer(parent) and parent > 0
+          {:error, :invalid_index} -> :ok
+          {:error, :invalid_resolution} -> :ok
+        end
+      end
+    end
+  end
 end
