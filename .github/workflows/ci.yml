@@ -66,7 +66,9 @@ jobs:
 
       - name: Compile (warnings as errors)
         id: compile
-        run: mix compile --warnings-as-errors
+        run: |
+          rm -rf _build/test/lib/ex_h3o
+          mix compile --warnings-as-errors
 
       - name: Run tests with coverage
         id: tests
@@ -209,4 +211,6 @@ jobs:
         run: mix deps.get
 
       - name: Run Dialyzer
-        run: mix dialyzer
+        run: |
+          rm -rf _build/dev/lib/ex_h3o
+          mix dialyzer
