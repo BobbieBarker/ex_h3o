@@ -644,9 +644,14 @@ defmodule ExH3o do
     end
   end
 
-  def polyfill(_vertices, resolution) when is_integer(resolution),
+  # Vertices are a list but resolution is either out of range or the wrong
+  # type entirely — either way, the geometry is acceptable and the resolution
+  # argument is the problem.
+  def polyfill(vertices, _resolution) when is_list(vertices),
     do: {:error, :invalid_resolution}
 
+  # Vertices are not a list — regardless of what `resolution` looks like,
+  # the geometry argument is structurally wrong.
   def polyfill(_vertices, _resolution), do: {:error, :invalid_geometry}
 
   def k_ring_distances(cell, k) do

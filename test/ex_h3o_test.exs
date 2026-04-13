@@ -1273,21 +1273,22 @@ defmodule ExH3oTest do
       assert Enum.sort(cells_open) == Enum.sort(cells_closed)
     end
 
-    # Exercises the fallback clause reached when `resolution` is not an
-    # integer at all (string, float, nil). The two primary clauses require
-    # `is_integer(resolution)`, so anything else falls through here.
-    #
-    # NOTE: the fallback returns `:invalid_geometry` for type-wrong
-    # resolution, which is semantically misleading (the geometry is fine,
-    # the resolution argument is the wrong type). This test locks in the
-    # CURRENT (wrong) behavior to close the coverage gap on FGE-497.
-    # The semantic fix is tracked in FGE-506 — when that lands it should
-    # update these assertions to `:invalid_resolution` and restructure the
-    # polyfill/2 clause order.
-    test "returns {:error, :invalid_geometry} for non-integer resolution" do
-      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, "5")
-      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, 5.0)
-      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, nil)
+    # Non-integer resolution with a valid polygon is a resolution-argument
+    # type error, not a geometry error. The @spec allows both atoms; this
+    # test pins the correct one.
+    test "returns {:error, :invalid_resolution} for non-integer resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, "5")
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, 5.0)
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, nil)
+    end
+
+    # Non-list vertices is a geometry-argument type error regardless of
+    # what `resolution` looks like — even if resolution is a valid integer,
+    # we should surface `:invalid_geometry` rather than `:invalid_resolution`.
+    test "returns {:error, :invalid_geometry} for non-list vertices" do
+      assert {:error, :invalid_geometry} = ExH3o.polyfill("not a list", 9)
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(nil, 9)
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(%{}, 9)
     end
   end
 end
