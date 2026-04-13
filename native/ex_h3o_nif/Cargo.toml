@@ -14,3 +14,4 @@ test_utils = []
 [dependencies]
 rustler = { version = "0.37", features = ["nif_version_2_17"] }
 h3o = { version = "0.9", features = ["geo"] }
+geo-types = "0.7"

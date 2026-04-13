@@ -1160,4 +1160,117 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "polyfill/2" do
+    # A small polygon around San Francisco (roughly 4 blocks)
+    @sf_polygon [
+      {37.7749, -122.4194},
+      {37.7749, -122.4094},
+      {37.7849, -122.4094},
+      {37.7849, -122.4194},
+      {37.7749, -122.4194}
+    ]
+
+    test "returns cells for a known polygon at resolution 9" do
+      assert {:ok, [_ | _] = cells} = ExH3o.polyfill(@sf_polygon, 9)
+
+      Enum.each(cells, fn cell ->
+        assert ExH3o.is_valid(cell)
+        assert {:ok, 9} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "returns more cells at higher resolution" do
+      assert {:ok, cells_7} = ExH3o.polyfill(@sf_polygon, 7)
+      assert {:ok, cells_9} = ExH3o.polyfill(@sf_polygon, 9)
+      assert length(cells_9) > length(cells_7)
+    end
+
+    test "returns empty list for degenerate polygon (single point)" do
+      point = [{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}]
+      assert {:ok, []} = ExH3o.polyfill(point, 0)
+    end
+
+    test "returns {:error, :invalid_resolution} for resolution > 15" do
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, 16)
+    end
+
+    test "returns {:error, :invalid_resolution} for negative resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, -1)
+    end
+
+    test "returns {:error, :invalid_geometry} for fewer than 3 distinct vertices" do
+      line = [{0.0, 0.0}, {1.0, 1.0}]
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(line, 5)
+    end
+
+    test "returns {:error, :invalid_geometry} for empty list" do
+      assert {:error, :invalid_geometry} = ExH3o.polyfill([], 5)
+    end
+
+    test "all returned cells are unique" do
+      assert {:ok, cells} = ExH3o.polyfill(@sf_polygon, 9)
+      assert length(Enum.uniq(cells)) == length(cells)
+    end
+
+    test "works at resolution 0" do
+      # Large polygon to ensure we get at least one cell at res 0
+      large_polygon = [
+        {-10.0, -10.0},
+        {-10.0, 10.0},
+        {10.0, 10.0},
+        {10.0, -10.0},
+        {-10.0, -10.0}
+      ]
+
+      assert {:ok, [_ | _] = cells} = ExH3o.polyfill(large_polygon, 0)
+
+      Enum.each(cells, fn cell ->
+        assert {:ok, 0} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "works at resolution 15 with tiny polygon" do
+      # Very small polygon — should still produce cells at res 15
+      tiny = [
+        {37.7749, -122.4194},
+        {37.7749, -122.4193},
+        {37.7750, -122.4193},
+        {37.7750, -122.4194},
+        {37.7749, -122.4194}
+      ]
+
+      assert {:ok, [_ | _] = cells} = ExH3o.polyfill(tiny, 15)
+
+      Enum.each(cells, fn cell ->
+        assert {:ok, 15} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "returned cells are within or near the polygon" do
+      assert {:ok, cells} = ExH3o.polyfill(@sf_polygon, 9)
+
+      Enum.each(cells, fn cell ->
+        assert {:ok, {lat, lng}} = ExH3o.to_geo(cell)
+        # Cell centroids should be near the polygon (within ~0.02° tolerance)
+        assert lat > 37.77 and lat < 37.79
+        assert lng > -122.42 and lng < -122.40
+      end)
+    end
+
+    test "polygon with closing vertex same as first produces same result as without" do
+      open = [
+        {37.7749, -122.4194},
+        {37.7749, -122.4094},
+        {37.7849, -122.4094},
+        {37.7849, -122.4194}
+      ]
+
+      closed = open ++ [List.first(open)]
+
+      assert {:ok, cells_open} = ExH3o.polyfill(open, 9)
+      assert {:ok, cells_closed} = ExH3o.polyfill(closed, 9)
+      assert Enum.sort(cells_open) == Enum.sort(cells_closed)
+    end
+  end
 end
