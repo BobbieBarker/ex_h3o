@@ -195,4 +195,23 @@ fn load(env: rustler::Env, _info: rustler::Term) -> bool {
     true
 }
 
+#[rustler::nif(schedule = "DirtyCpu")]
+fn k_ring_distances<'a>(env: Env<'a>, cell: u64, k: u32) -> Term<'a> {
+    let cell_index = match CellIndex::try_from(cell) {
+        Ok(c) => c,
+        Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+    };
+
+    let pairs: Vec<(CellIndex, u32)> = cell_index.grid_disk_distances::<Vec<_>>(k);
+    let mut binary = NewBinary::new(env, pairs.len() * 16);
+    let buf = binary.as_mut_slice();
+    for (i, (c, d)) in pairs.iter().enumerate() {
+        let offset = i * 16;
+        buf[offset..offset + 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+        buf[offset + 8..offset + 16].copy_from_slice(&(u64::from(*d)).to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
+}
+
 rustler::init!("Elixir.ExH3o.Native", load = load);

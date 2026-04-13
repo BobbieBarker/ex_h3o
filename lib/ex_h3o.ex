@@ -529,4 +529,42 @@ defmodule ExH3o do
         error
     end
   end
+
+  @doc """
+  Returns the cells within k-ring distance along with their distances.
+
+  Like `k_ring/2`, but each result is a `{cell_index, distance}` tuple where
+  `distance` is the grid distance from the origin cell (0 for the origin itself).
+
+  The NIF returns a packed binary of 16-byte `{u64, u64}` pairs for efficiency —
+  this function decodes it into a list of tuples.
+
+  ## Examples
+
+      iex> {:ok, [{cell, 0}]} = ExH3o.k_ring_distances(0x8928308280fffff, 0)
+      iex> cell == 0x8928308280fffff
+      true
+
+      iex> {:ok, pairs} = ExH3o.k_ring_distances(0x8928308280fffff, 1)
+      iex> length(pairs)
+      7
+
+      iex> ExH3o.k_ring_distances(0, 1)
+      {:error, :invalid_index}
+  """
+  @spec k_ring_distances(non_neg_integer(), non_neg_integer()) ::
+          {:ok, [{non_neg_integer(), non_neg_integer()}]} | {:error, :invalid_index}
+  def k_ring_distances(cell, k) do
+    case ExH3o.Native.k_ring_distances(cell, k) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok,
+         for(
+           <<index::native-unsigned-64, distance::native-unsigned-64 <- packed>>,
+           do: {index, distance}
+         )}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 end

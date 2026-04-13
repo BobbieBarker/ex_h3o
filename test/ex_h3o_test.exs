@@ -983,4 +983,88 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "k_ring_distances/2" do
+    test "k=0 returns only {cell, 0}" do
+      assert {:ok, [{cell, 0}]} = ExH3o.k_ring_distances(@valid_cell, 0)
+      assert cell == @valid_cell
+    end
+
+    test "k=1 has center at distance 0 and 6 neighbors at distance 1" do
+      assert {:ok, pairs} = ExH3o.k_ring_distances(@valid_cell, 1)
+      assert length(pairs) == 7
+
+      {at_0, at_1} = Enum.split_with(pairs, fn {_cell, dist} -> dist == 0 end)
+      assert length(at_0) == 1
+      assert [{@valid_cell, 0}] = at_0
+      assert length(at_1) == 6
+      Enum.each(at_1, fn {_cell, dist} -> assert dist == 1 end)
+    end
+
+    test "k=2 returns 19 pairs with correct distance distribution" do
+      assert {:ok, pairs} = ExH3o.k_ring_distances(@valid_cell, 2)
+      assert length(pairs) == 19
+
+      by_distance = Enum.group_by(pairs, fn {_cell, dist} -> dist end)
+      assert length(by_distance[0]) == 1
+      assert length(by_distance[1]) == 6
+      assert length(by_distance[2]) == 12
+    end
+
+    test "returns same cells as k_ring" do
+      {:ok, ring_cells} = ExH3o.k_ring(@valid_cell, 2)
+      {:ok, dist_pairs} = ExH3o.k_ring_distances(@valid_cell, 2)
+      dist_cells = Enum.map(dist_pairs, fn {cell, _dist} -> cell end)
+
+      assert Enum.sort(ring_cells) == Enum.sort(dist_cells)
+    end
+
+    test "all returned cells are valid H3 indices" do
+      assert {:ok, pairs} = ExH3o.k_ring_distances(@valid_cell, 2)
+
+      Enum.each(pairs, fn {cell, _dist} ->
+        assert ExH3o.is_valid(cell)
+      end)
+    end
+
+    test "all distances are non-negative integers" do
+      assert {:ok, pairs} = ExH3o.k_ring_distances(@valid_cell, 2)
+
+      Enum.each(pairs, fn {_cell, dist} ->
+        assert is_integer(dist) and dist >= 0
+      end)
+    end
+
+    test "returns error for invalid cell index" do
+      assert {:error, :invalid_index} = ExH3o.k_ring_distances(@zero, 1)
+    end
+
+    test "returns error for garbage cell" do
+      assert {:error, :invalid_index} = ExH3o.k_ring_distances(@garbage, 1)
+    end
+
+    test "returns error for max uint64 cell" do
+      assert {:error, :invalid_index} = ExH3o.k_ring_distances(@max_uint64, 1)
+    end
+
+    property "returns {:ok, _} or {:error, :invalid_index} for any inputs" do
+      check all(
+              cell <- non_negative_integer(),
+              k <- integer(0..3)
+            ) do
+        case ExH3o.k_ring_distances(cell, k) do
+          {:ok, pairs} ->
+            assert is_list(pairs)
+
+            Enum.each(pairs, fn {c, d} ->
+              assert is_integer(c) and c > 0
+              assert is_integer(d) and d >= 0
+            end)
+
+          {:error, :invalid_index} ->
+            :ok
+        end
+      end
+    end
+  end
 end

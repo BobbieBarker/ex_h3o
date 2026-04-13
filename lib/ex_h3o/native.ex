@@ -70,4 +70,8 @@ defmodule ExH3o.Native do
     @spec dirty_sleep(non_neg_integer()) :: :ok
     def dirty_sleep(_ms), do: :erlang.nif_error(:nif_not_loaded)
   end
+
+  @spec k_ring_distances(non_neg_integer(), non_neg_integer()) ::
+          {:ok, binary()} | {:error, :invalid_index}
+  def k_ring_distances(_cell, _k), do: :erlang.nif_error(:nif_not_loaded)
 end
