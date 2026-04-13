@@ -3,10 +3,188 @@ defmodule ExH3o do
   Elixir bindings for [h3o](https://github.com/HydroniumLabs/h3o), a Rust
   implementation of the H3 geospatial indexing system.
 
+  Several functions are implemented as pure Elixir (no NIF roundtrip):
+  `max_k_ring_size/1`, `num_hexagons/1`, `edge_length_kilometers/1`,
+  `edge_length_meters/1`, `hex_area_km2/1`, `hex_area_m2/1`, and
+  `get_res0_indexes/0`.
+
   H3 is a hierarchical hexagonal grid system that maps geographic coordinates
   to hexagonal cells at multiple resolutions (0-15). It is used for spatial
   indexing, analysis, and aggregation of geospatial data.
   """
+
+  import Bitwise, only: [bor: 2, bsl: 2]
+
+  @edge_length_km {1281.256011, 483.0568391, 182.5129565, 68.97922179, 26.07175968, 9.854090990,
+                   3.724532667, 1.406475763, 0.531414010, 0.200786148, 0.075863783, 0.028663897,
+                   0.010830188, 0.004092010, 0.001546100, 0.000584169}
+
+  @edge_length_m {1_281_256.011, 483_056.8391, 182_512.9565, 68_979.22179, 26_071.75968,
+                  9854.090990, 3724.532667, 1406.475763, 531.4140101, 200.7861476, 75.86378287,
+                  28.66389748, 10.83018784, 4.092010473, 1.546099657, 0.584168630}
+
+  # credo:disable-for-lines:7 Credo.Check.Readability.LargeNumbers
+  @hex_area_km2 {4.357449416078383e6, 6.097884417941332e5, 8.680178039899720e4,
+                 1.239343465508816e4, 1.770347654491307e3, 2.529038581819449e2,
+                 3.612906216441245e1, 5.161293359717191e0, 7.373275975944177e-1,
+                 1.053325134272067e-1, 1.504750190766435e-2, 2.149643129451879e-3,
+                 3.070918756316060e-4, 4.387026794728296e-5, 6.267181135324313e-6,
+                 8.953115907605790e-7}
+
+  # credo:disable-for-lines:7 Credo.Check.Readability.LargeNumbers
+  @hex_area_m2 {4.357449416078390e12, 6.097884417941339e11, 8.680178039899731e10,
+                1.239343465508818e10, 1.770347654491309e9, 2.529038581819452e8,
+                3.612906216441250e7, 5.161293359717198e6, 7.373275975944188e5,
+                1.053325134272069e5, 1.504750190766437e4, 2.149643129451882e3,
+                3.070918756316063e2, 4.387026794728301e1, 6.267181135324322e0,
+                8.953115907605802e-1}
+
+  @res0_indexes for bc <- 0..121, do: bor(bor(bsl(1, 59), bsl(bc, 45)), 0x1FFFFFFFFFFF)
+
+  @doc """
+  Returns the maximum number of cells in a k-ring of size `k`.
+
+  This is a pure computation: `3k² + 3k + 1`.
+
+  ## Examples
+
+      iex> ExH3o.max_k_ring_size(0)
+      1
+
+      iex> ExH3o.max_k_ring_size(1)
+      7
+
+      iex> ExH3o.max_k_ring_size(2)
+      19
+  """
+  @spec max_k_ring_size(non_neg_integer()) :: non_neg_integer()
+  def max_k_ring_size(k) when is_integer(k) and k >= 0 do
+    3 * k * k + 3 * k + 1
+  end
+
+  @doc """
+  Returns the total number of unique H3 indexes at the given resolution.
+
+  The formula is `2 + 120 × 7^resolution`.
+
+  ## Examples
+
+      iex> ExH3o.num_hexagons(0)
+      {:ok, 122}
+
+      iex> ExH3o.num_hexagons(15)
+      {:ok, 569_707_381_193_162}
+
+      iex> ExH3o.num_hexagons(16)
+      {:error, :invalid_resolution}
+  """
+  @spec num_hexagons(integer()) :: {:ok, non_neg_integer()} | {:error, :invalid_resolution}
+  def num_hexagons(resolution) when is_integer(resolution) and resolution in 0..15 do
+    {:ok, 2 + 120 * Integer.pow(7, resolution)}
+  end
+
+  def num_hexagons(_resolution), do: {:error, :invalid_resolution}
+
+  @doc """
+  Returns the average hexagon edge length in kilometers at the given resolution.
+
+  Excludes pentagons.
+
+  ## Examples
+
+      iex> {:ok, length} = ExH3o.edge_length_kilometers(0)
+      iex> length > 1000
+      true
+
+      iex> ExH3o.edge_length_kilometers(16)
+      {:error, :invalid_resolution}
+  """
+  @spec edge_length_kilometers(integer()) :: {:ok, float()} | {:error, :invalid_resolution}
+  def edge_length_kilometers(resolution) when is_integer(resolution) and resolution in 0..15 do
+    {:ok, elem(@edge_length_km, resolution)}
+  end
+
+  def edge_length_kilometers(_resolution), do: {:error, :invalid_resolution}
+
+  @doc """
+  Returns the average hexagon edge length in meters at the given resolution.
+
+  Excludes pentagons.
+
+  ## Examples
+
+      iex> {:ok, length} = ExH3o.edge_length_meters(0)
+      iex> length > 1_000_000
+      true
+
+      iex> ExH3o.edge_length_meters(16)
+      {:error, :invalid_resolution}
+  """
+  @spec edge_length_meters(integer()) :: {:ok, float()} | {:error, :invalid_resolution}
+  def edge_length_meters(resolution) when is_integer(resolution) and resolution in 0..15 do
+    {:ok, elem(@edge_length_m, resolution)}
+  end
+
+  def edge_length_meters(_resolution), do: {:error, :invalid_resolution}
+
+  @doc """
+  Returns the average hexagon area in square kilometers at the given resolution.
+
+  Excludes pentagons.
+
+  ## Examples
+
+      iex> {:ok, area} = ExH3o.hex_area_km2(0)
+      iex> area > 4_000_000
+      true
+
+      iex> ExH3o.hex_area_km2(16)
+      {:error, :invalid_resolution}
+  """
+  @spec hex_area_km2(integer()) :: {:ok, float()} | {:error, :invalid_resolution}
+  def hex_area_km2(resolution) when is_integer(resolution) and resolution in 0..15 do
+    {:ok, elem(@hex_area_km2, resolution)}
+  end
+
+  def hex_area_km2(_resolution), do: {:error, :invalid_resolution}
+
+  @doc """
+  Returns the average hexagon area in square meters at the given resolution.
+
+  Excludes pentagons.
+
+  ## Examples
+
+      iex> {:ok, area} = ExH3o.hex_area_m2(0)
+      iex> area > 4.0e12
+      true
+
+      iex> ExH3o.hex_area_m2(16)
+      {:error, :invalid_resolution}
+  """
+  @spec hex_area_m2(integer()) :: {:ok, float()} | {:error, :invalid_resolution}
+  def hex_area_m2(resolution) when is_integer(resolution) and resolution in 0..15 do
+    {:ok, elem(@hex_area_m2, resolution)}
+  end
+
+  def hex_area_m2(_resolution), do: {:error, :invalid_resolution}
+
+  @doc """
+  Returns all 122 resolution 0 (base cell) H3 indexes.
+
+  These are the coarsest cells in the H3 system and are the
+  ancestors of all other cells.
+
+  ## Examples
+
+      iex> {:ok, cells} = ExH3o.get_res0_indexes()
+      iex> length(cells)
+      122
+  """
+  @spec get_res0_indexes() :: {:ok, [non_neg_integer()]}
+  def get_res0_indexes do
+    {:ok, @res0_indexes}
+  end
 
   @doc """
   Returns whether `cell` is a valid H3 cell index.
