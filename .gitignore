@@ -28,7 +28,11 @@ ex_h3o-*.tar
 # Compiled NIF shared library
 /priv/native/
 
+<<<<<<< FGE-485
+# Dialyzer PLT files
+=======
 # Dialyzer PLT files (machine-specific, regenerated per environment)
+>>>>>>> main
 /priv/plts/
 
 # Forge Framework injected artifacts (proprietary — do not commit)
