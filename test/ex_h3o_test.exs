@@ -1272,5 +1272,22 @@ defmodule ExH3oTest do
       assert {:ok, cells_closed} = ExH3o.polyfill(closed, 9)
       assert Enum.sort(cells_open) == Enum.sort(cells_closed)
     end
+
+    # Exercises the fallback clause reached when `resolution` is not an
+    # integer at all (string, float, nil). The two primary clauses require
+    # `is_integer(resolution)`, so anything else falls through here.
+    #
+    # NOTE: the fallback returns `:invalid_geometry` for type-wrong
+    # resolution, which is semantically misleading (the geometry is fine,
+    # the resolution argument is the wrong type). This test locks in the
+    # CURRENT (wrong) behavior to close the coverage gap on FGE-497.
+    # The semantic fix is tracked in FGE-506 — when that lands it should
+    # update these assertions to `:invalid_resolution` and restructure the
+    # polyfill/2 clause order.
+    test "returns {:error, :invalid_geometry} for non-integer resolution" do
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, "5")
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, 5.0)
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(@sf_polygon, nil)
+    end
   end
 end
