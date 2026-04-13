@@ -1272,5 +1272,20 @@ defmodule ExH3oTest do
       assert {:ok, cells_closed} = ExH3o.polyfill(closed, 9)
       assert Enum.sort(cells_open) == Enum.sort(cells_closed)
     end
+
+    # Exercises the fallback clause reached when `resolution` is not an
+    # integer at all (string, float, nil). The two primary clauses require
+    # `is_integer(resolution)`, so anything else falls through here.
+    #
+    test "returns {:error, :invalid_resolution} for non-integer resolution" do
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, "5")
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, 5.0)
+      assert {:error, :invalid_resolution} = ExH3o.polyfill(@sf_polygon, nil)
+    end
+
+    test "returns {:error, :invalid_geometry} for non-list vertices" do
+      assert {:error, :invalid_geometry} = ExH3o.polyfill(:not_a_list, 5)
+      assert {:error, :invalid_geometry} = ExH3o.polyfill("vertices", 5)
+    end
   end
 end

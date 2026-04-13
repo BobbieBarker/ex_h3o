@@ -1,0 +1,21 @@
+# Codecov configuration for ex_h3o
+#
+# NIF stub modules are intentionally excluded from coverage: Rustler replaces
+# every function body with the native implementation at BEAM load time, so
+# the stub `do: :erlang.nif_error(:nif_not_loaded)` body is structurally
+# unreachable from ExUnit. Including it in coverage produces false negatives
+# that never improve no matter how many tests are written.
+
+coverage:
+  status:
+    patch:
+      default:
+        target: 80%
+        threshold: 2%
+    project:
+      default:
+        target: auto
+        threshold: 1%
+
+ignore:
+  - "lib/ex_h3o/native.ex"

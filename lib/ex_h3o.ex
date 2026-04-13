@@ -631,7 +631,7 @@ defmodule ExH3o do
       iex> ExH3o.polyfill(polygon, 16)
       {:error, :invalid_resolution}
   """
-  @spec polyfill([{float(), float()}], non_neg_integer()) ::
+  @spec polyfill([{float(), float()}], 0..15) ::
           {:ok, [non_neg_integer()]} | {:error, :invalid_geometry | :invalid_resolution}
   def polyfill(vertices, resolution)
       when is_list(vertices) and is_integer(resolution) and resolution in 0..15 do
@@ -644,11 +644,23 @@ defmodule ExH3o do
     end
   end
 
-  def polyfill(_vertices, resolution) when is_integer(resolution),
+  def polyfill(vertices, _resolution) when is_list(vertices),
     do: {:error, :invalid_resolution}
 
   def polyfill(_vertices, _resolution), do: {:error, :invalid_geometry}
 
+  @doc """
+  Returns the H3 cell indices within `k` grid steps of `cell`, paired with
+  their respective grid distances.
+
+  ## Examples
+
+      iex> {:ok, [{cell, 0}]} = ExH3o.k_ring_distances(617700169958293503, 0)
+      iex> cell
+      617700169958293503
+  """
+  @spec k_ring_distances(non_neg_integer(), non_neg_integer()) ::
+          {:ok, [{non_neg_integer(), non_neg_integer()}]} | {:error, atom()}
   def k_ring_distances(cell, k) do
     case ExH3o.Native.k_ring_distances(cell, k) do
       {:ok, packed} when is_binary(packed) ->
