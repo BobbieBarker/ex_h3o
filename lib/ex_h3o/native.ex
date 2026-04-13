@@ -77,4 +77,8 @@ defmodule ExH3o.Native do
           {:ok, binary()}
           | {:error, :invalid_index | :heterogeneous_resolution | :duplicate_input}
   def compact(_packed), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec uncompact(binary(), non_neg_integer()) ::
+          {:ok, binary()} | {:error, :invalid_index | :invalid_resolution}
+  def uncompact(_packed, _resolution), do: :erlang.nif_error(:nif_not_loaded)
 end
