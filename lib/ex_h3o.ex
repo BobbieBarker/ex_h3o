@@ -455,4 +455,78 @@ defmodule ExH3o do
         error
     end
   end
+
+  @doc """
+  Converts geographic coordinates to an H3 cell index at the given resolution.
+
+  Takes a `{lat, lng}` tuple in degrees and a resolution (0–15). Returns the
+  H3 cell index containing the given coordinates.
+
+  ## Examples
+
+      iex> {:ok, cell} = ExH3o.from_geo({37.7749, -122.4194}, 9)
+      iex> ExH3o.is_valid(cell)
+      true
+
+      iex> ExH3o.from_geo({91.0, 0.0}, 9)
+      {:error, :invalid_coordinates}
+
+      iex> ExH3o.from_geo({0.0, 0.0}, 16)
+      {:error, :invalid_resolution}
+  """
+  @spec from_geo({float(), float()}, 0..15) ::
+          {:ok, non_neg_integer()} | {:error, :invalid_coordinates | :invalid_resolution}
+  def from_geo({lat, lng}, resolution) when is_number(lat) and is_number(lng) do
+    ExH3o.Native.from_geo(lat / 1, lng / 1, resolution)
+  end
+
+  def from_geo({_lat, _lng}, _resolution), do: {:error, :invalid_coordinates}
+
+  @doc """
+  Returns the center coordinates of the given H3 cell index.
+
+  Returns `{lat, lng}` in degrees where lat is in `[-90, 90]` and lng is
+  in `[-180, 180]`.
+
+  ## Examples
+
+      iex> {:ok, {lat, lng}} = ExH3o.to_geo(0x8928308280fffff)
+      iex> lat >= -90.0 and lat <= 90.0 and lng >= -180.0 and lng <= 180.0
+      true
+
+      iex> ExH3o.to_geo(0)
+      {:error, :invalid_index}
+  """
+  @spec to_geo(non_neg_integer()) :: {:ok, {float(), float()}} | {:error, :invalid_index}
+  defdelegate to_geo(cell), to: ExH3o.Native
+
+  @doc """
+  Returns the boundary vertices of the given H3 cell index.
+
+  Returns a list of `{lat, lng}` tuples in degrees. Hexagons have 6 vertices,
+  pentagons have 5.
+
+  The NIF returns a packed binary of f64 lat/lng pairs for efficiency —
+  this function decodes it into a list of tuples.
+
+  ## Examples
+
+      iex> {:ok, vertices} = ExH3o.to_geo_boundary(0x8928308280fffff)
+      iex> length(vertices)
+      6
+
+      iex> ExH3o.to_geo_boundary(0)
+      {:error, :invalid_index}
+  """
+  @spec to_geo_boundary(non_neg_integer()) ::
+          {:ok, [{float(), float()}, ...]} | {:error, :invalid_index}
+  def to_geo_boundary(cell) do
+    case ExH3o.Native.to_geo_boundary(cell) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok, for(<<lat::native-float-64, lng::native-float-64 <- packed>>, do: {lat, lng})}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 end
