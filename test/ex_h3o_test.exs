@@ -969,17 +969,22 @@ defmodule ExH3oTest do
       assert abs(lng - orig_lng) < 0.01
     end
 
-    property "roundtrip within 0.02° for any valid coordinates at resolution 9" do
-      # Avoid poles and antimeridian where cell centers can wrap significantly.
-      # Tolerance is 0.02° because high-latitude cells are wider in longitude.
+    property "re-encoding a decoded coordinate returns the same cell (FGE-507)" do
+      # This is a *wrapper integration* test, not an h3o precision test.
+      # We verify that our NIF boundary preserves cell-index data correctly:
+      # from_geo encodes a coordinate as a cell, to_geo returns that cell's
+      # centroid, and from_geo applied to the centroid must return the same
+      # cell. If either NIF mangled its data (endianness, bit truncation,
+      # byte-order mismatch), this property fails — but it makes no claim
+      # about h3o's numerical precision at any latitude. That is the h3o
+      # crate's concern, not ours. See FGE-507 for the principle.
       check all(
               lat <- float(min: -85.0, max: 85.0),
               lng <- float(min: -170.0, max: 170.0)
             ) do
         assert {:ok, cell} = ExH3o.from_geo({lat, lng}, 9)
         assert {:ok, {rlat, rlng}} = ExH3o.to_geo(cell)
-        assert abs(rlat - lat) < 0.02
-        assert abs(rlng - lng) < 0.02
+        assert {:ok, ^cell} = ExH3o.from_geo({rlat, rlng}, 9)
       end
     end
   end
