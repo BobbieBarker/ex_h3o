@@ -1,10 +1,18 @@
 # Codecov configuration for ex_h3o
 #
-# NIF stub modules are intentionally excluded from coverage: Rustler replaces
-# every function body with the native implementation at BEAM load time, so
-# the stub `do: :erlang.nif_error(:nif_not_loaded)` body is structurally
-# unreachable from ExUnit. Including it in coverage produces false negatives
-# that never improve no matter how many tests are written.
+# Exclusion rationale per path:
+#
+# - lib/ex_h3o/native.ex — NIF stub module. Rustler replaces every function
+#   body with the native implementation at BEAM load time, so the stub
+#   `do: :erlang.nif_error(:nif_not_loaded)` body is structurally unreachable
+#   from ExUnit. Coverage is always 0% no matter how many tests are written.
+#
+# - lib/ex_h3o/stress/ — Performance testing infrastructure. The stress
+#   harness is a development tool (invoked via `mix run bench/stress.exs`)
+#   not a production code path. It spawns processes, manipulates scheduler
+#   accounting, and requires a live NIF to meaningfully execute. Writing
+#   ExUnit tests against it would test the test harness itself, which is
+#   backwards. Measured by the bench/ scripts it drives, not by unit tests.
 
 coverage:
   status:
@@ -19,3 +27,4 @@ coverage:
 
 ignore:
   - "lib/ex_h3o/native.ex"
+  - "lib/ex_h3o/stress/"
