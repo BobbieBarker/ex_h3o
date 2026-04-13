@@ -9,6 +9,30 @@ fn is_valid(cell: u64) -> bool {
     CellIndex::try_from(cell).is_ok()
 }
 
+#[rustler::nif]
+fn get_resolution(cell: u64) -> Result<u8, rustler::Atom> {
+    let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    Ok(u8::from(cell.resolution()))
+}
+
+#[rustler::nif]
+fn get_base_cell(cell: u64) -> Result<u8, rustler::Atom> {
+    let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    Ok(u8::from(cell.base_cell()))
+}
+
+#[rustler::nif]
+fn is_pentagon(cell: u64) -> Result<bool, rustler::Atom> {
+    let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    Ok(cell.is_pentagon())
+}
+
+#[rustler::nif]
+fn is_class3(cell: u64) -> Result<bool, rustler::Atom> {
+    let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    Ok(cell.resolution().is_class3())
+}
+
 /// Dirty CPU NIF that sleeps for `ms` milliseconds and returns `:ok`.
 /// Used to verify that `ERL_NIF_OPT_DELAY_HALT` allows in-flight dirty
 /// NIFs to complete before the VM halts. Only compiled with the
