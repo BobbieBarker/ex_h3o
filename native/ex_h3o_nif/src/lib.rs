@@ -1,3 +1,6 @@
+mod atoms;
+mod types;
+
 use h3o::CellIndex;
 use rustler::sys::{enif_set_option, ErlNifOption};
 

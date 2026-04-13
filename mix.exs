@@ -8,7 +8,7 @@ defmodule ExH3o.MixProject do
     [
       app: :ex_h3o,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       dialyzer: dialyzer(),
@@ -24,8 +24,13 @@ defmodule ExH3o.MixProject do
       docs: docs(),
 
       # Test
-      test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: [
+      test_coverage: [tool: ExCoveralls]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.html": :test,
@@ -46,7 +51,9 @@ defmodule ExH3o.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:stream_data, "~> 0.6", only: [:dev, :test]},
+      {:benchee, "~> 1.0", only: [:dev, :test]}
     ]
   end
 
