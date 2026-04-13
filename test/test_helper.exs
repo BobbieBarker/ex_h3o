@@ -1,1 +1,1 @@
-ExUnit.start(exclude: [:pending_uncompact])
+ExUnit.start()

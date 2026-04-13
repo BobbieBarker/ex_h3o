@@ -985,7 +985,6 @@ defmodule ExH3oTest do
   end
 
   describe "compact/1" do
-    @tag :pending_uncompact
     test "compact then uncompact roundtrips to original set" do
       {:ok, children} = ExH3o.children(@valid_cell, 10)
       assert {:ok, compacted} = ExH3o.compact(children)
@@ -1039,9 +1038,7 @@ defmodule ExH3oTest do
     end
   end
 
-  # uncompact/2 is not yet implemented — tests tagged :pending_uncompact
   describe "uncompact/2" do
-    @tag :pending_uncompact
     test "uncompact expands to correct resolution" do
       {:ok, uncompacted} = ExH3o.uncompact([@valid_cell], 10)
 
@@ -1050,24 +1047,33 @@ defmodule ExH3oTest do
       end)
     end
 
-    @tag :pending_uncompact
     test "uncompact at same resolution returns identity" do
       assert {:ok, [@valid_cell]} = ExH3o.uncompact([@valid_cell], 9)
     end
 
-    @tag :pending_uncompact
     test "uncompact of empty list returns empty list" do
       assert {:ok, []} = ExH3o.uncompact([], 5)
     end
 
-    @tag :pending_uncompact
     test "returns {:error, :invalid_resolution} for coarser resolution" do
       assert {:error, :invalid_resolution} = ExH3o.uncompact([@valid_cell], 8)
     end
 
-    @tag :pending_uncompact
     test "returns {:error, :invalid_resolution} for resolution > 15" do
       assert {:error, :invalid_resolution} = ExH3o.uncompact([@valid_cell], 16)
+    end
+
+    test "all uncompacted cells are valid H3 indices" do
+      {:ok, uncompacted} = ExH3o.uncompact([@valid_cell], 10)
+
+      Enum.each(uncompacted, fn cell ->
+        assert ExH3o.is_valid(cell)
+      end)
+    end
+
+    test "uncompact produces expected child count for hexagon" do
+      {:ok, uncompacted} = ExH3o.uncompact([@valid_cell], 10)
+      assert length(uncompacted) == 7
     end
   end
 

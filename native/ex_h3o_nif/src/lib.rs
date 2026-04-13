@@ -251,4 +251,40 @@ fn compact<'a>(env: Env<'a>, packed: rustler::Binary) -> Term<'a> {
     }
 }
 
+#[rustler::nif(schedule = "DirtyCpu")]
+fn uncompact<'a>(env: Env<'a>, packed: rustler::Binary, resolution: u8) -> Term<'a> {
+    let res = match Resolution::try_from(resolution) {
+        Ok(r) => r,
+        Err(_) => return (atoms::error(), atoms::invalid_resolution()).encode(env),
+    };
+
+    let bytes = packed.as_slice();
+    if bytes.len() % 8 != 0 {
+        return (atoms::error(), atoms::invalid_index()).encode(env);
+    }
+
+    let mut cells: Vec<CellIndex> = Vec::with_capacity(bytes.len() / 8);
+    for chunk in bytes.chunks_exact(8) {
+        let raw = u64::from_ne_bytes(chunk.try_into().unwrap());
+        match CellIndex::try_from(raw) {
+            Ok(cell) => {
+                if u8::from(cell.resolution()) > resolution {
+                    return (atoms::error(), atoms::invalid_resolution()).encode(env);
+                }
+                cells.push(cell);
+            }
+            Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+        }
+    }
+
+    let result: Vec<CellIndex> = CellIndex::uncompact(cells, res).collect();
+    let mut binary = NewBinary::new(env, result.len() * 8);
+    let buf = binary.as_mut_slice();
+    for (i, c) in result.iter().enumerate() {
+        buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
+}
+
 rustler::init!("Elixir.ExH3o.Native", load = load);

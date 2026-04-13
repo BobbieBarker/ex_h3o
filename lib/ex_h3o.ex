@@ -565,6 +565,47 @@ defmodule ExH3o do
     for cell <- cells, into: <<>>, do: <<cell::native-unsigned-64>>
   end
 
+  @doc """
+  Expands a compacted set of H3 cell indices to the given resolution.
+
+  Each cell in the input is dissolved into its descendants at the target
+  resolution. The target resolution must be equal to or finer than every
+  cell's resolution. When a cell is already at the target resolution, it
+  passes through unchanged.
+
+  This is the inverse of `compact/1`.
+
+  ## Examples
+
+      iex> {:ok, children} = ExH3o.children(0x8928308280fffff, 10)
+      iex> {:ok, compacted} = ExH3o.compact(children)
+      iex> {:ok, uncompacted} = ExH3o.uncompact(compacted, 10)
+      iex> Enum.sort(uncompacted) == Enum.sort(children)
+      true
+
+      iex> ExH3o.uncompact([0x8928308280fffff], 9)
+      {:ok, [0x8928308280fffff]}
+
+      iex> ExH3o.uncompact([], 5)
+      {:ok, []}
+
+      iex> ExH3o.uncompact([0x8928308280fffff], 8)
+      {:error, :invalid_resolution}
+  """
+  @spec uncompact([non_neg_integer()], non_neg_integer()) ::
+          {:ok, [non_neg_integer()]} | {:error, :invalid_index | :invalid_resolution}
+  def uncompact(cells, resolution) when is_list(cells) do
+    packed = pack_cells(cells)
+
+    case ExH3o.Native.uncompact(packed, resolution) do
+      {:ok, result} when is_binary(result) ->
+        {:ok, for(<<index::native-unsigned-64 <- result>>, do: index)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
   def k_ring_distances(cell, k) do
     case ExH3o.Native.k_ring_distances(cell, k) do
       {:ok, packed} when is_binary(packed) ->
