@@ -151,4 +151,39 @@ defmodule ExH3o do
         error
     end
   end
+
+  @doc """
+  Returns the cells within k-ring distance of the given cell.
+
+  k-ring (grid disk) returns all cells whose grid distance is at most `k`
+  from the origin cell. At k=0, returns only the origin. Cell count follows
+  the formula 3k² + 3k + 1 for hexagonal cells.
+
+  The NIF returns a packed binary of u64 cell indices for efficiency —
+  this function decodes it into a list of integers.
+
+  ## Examples
+
+      iex> {:ok, [cell]} = ExH3o.k_ring(0x8928308280fffff, 0)
+      iex> cell == 0x8928308280fffff
+      true
+
+      iex> {:ok, cells} = ExH3o.k_ring(0x8928308280fffff, 1)
+      iex> length(cells)
+      7
+
+      iex> ExH3o.k_ring(0, 1)
+      {:error, :invalid_index}
+  """
+  @spec k_ring(non_neg_integer(), non_neg_integer()) ::
+          {:ok, [non_neg_integer()]} | {:error, :invalid_index}
+  def k_ring(cell, k) do
+    case ExH3o.Native.k_ring(cell, k) do
+      {:ok, packed} when is_binary(packed) ->
+        {:ok, for(<<index::native-unsigned-64 <- packed>>, do: index)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 end

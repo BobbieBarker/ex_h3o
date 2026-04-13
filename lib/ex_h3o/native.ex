@@ -33,6 +33,10 @@ defmodule ExH3o.Native do
           {:ok, binary()} | {:error, :invalid_index | :invalid_resolution}
   def children(_cell, _resolution), do: :erlang.nif_error(:nif_not_loaded)
 
+  @spec k_ring(non_neg_integer(), non_neg_integer()) ::
+          {:ok, binary()} | {:error, :invalid_index}
+  def k_ring(_cell, _k), do: :erlang.nif_error(:nif_not_loaded)
+
   if Application.compile_env(:ex_h3o, :include_test_utils, false) do
     @doc false
     @spec dirty_sleep(non_neg_integer()) :: :ok

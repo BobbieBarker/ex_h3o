@@ -318,4 +318,81 @@ defmodule ExH3oTest do
       end
     end
   end
+
+  describe "k_ring/2" do
+    test "k=0 returns only the cell itself" do
+      assert {:ok, [cell]} = ExH3o.k_ring(@valid_cell, 0)
+      assert cell == @valid_cell
+    end
+
+    test "k=1 returns 7 cells" do
+      assert {:ok, cells} = ExH3o.k_ring(@valid_cell, 1)
+      assert length(cells) == 7
+    end
+
+    test "k=2 returns 19 cells" do
+      assert {:ok, cells} = ExH3o.k_ring(@valid_cell, 2)
+      assert length(cells) == 19
+    end
+
+    test "all returned cells are valid H3 indices" do
+      assert {:ok, cells} = ExH3o.k_ring(@valid_cell, 2)
+
+      Enum.each(cells, fn cell ->
+        assert ExH3o.is_valid(cell)
+      end)
+    end
+
+    test "all returned cells have the same resolution as input" do
+      assert {:ok, cells} = ExH3o.k_ring(@valid_cell, 1)
+
+      Enum.each(cells, fn cell ->
+        assert {:ok, 9} = ExH3o.get_resolution(cell)
+      end)
+    end
+
+    test "result includes the origin cell" do
+      assert {:ok, cells} = ExH3o.k_ring(@valid_cell, 1)
+      assert @valid_cell in cells
+    end
+
+    test "returns error for invalid cell index" do
+      assert {:error, :invalid_index} = ExH3o.k_ring(@zero, 1)
+    end
+
+    test "returns error for garbage cell" do
+      assert {:error, :invalid_index} = ExH3o.k_ring(@garbage, 1)
+    end
+
+    test "returns error for max uint64 cell" do
+      assert {:error, :invalid_index} = ExH3o.k_ring(@max_uint64, 1)
+    end
+
+    property "cell count follows 3k² + 3k + 1 formula for valid cells" do
+      check all(cell <- non_negative_integer()) do
+        with {:ok, _res} <- ExH3o.get_resolution(cell) do
+          k = 1
+          {:ok, cells} = ExH3o.k_ring(cell, k)
+          expected = 3 * k * k + 3 * k + 1
+          assert length(cells) == expected
+        end
+      end
+    end
+
+    property "returns {:ok, _} or {:error, :invalid_index} for any inputs" do
+      check all(
+              cell <- non_negative_integer(),
+              k <- integer(0..3)
+            ) do
+        case ExH3o.k_ring(cell, k) do
+          {:ok, cells} ->
+            assert is_list(cells)
+            Enum.each(cells, fn c -> assert is_integer(c) and c > 0 end)
+
+          {:error, :invalid_index} ->
+            :ok
+        end
+      end
+    end
+  end
 end

@@ -70,6 +70,23 @@ fn children<'a>(env: Env<'a>, cell: u64, resolution: u8) -> Term<'a> {
     (atoms::ok(), binary).encode(env)
 }
 
+#[rustler::nif(schedule = "DirtyCpu")]
+fn k_ring<'a>(env: Env<'a>, cell: u64, k: u32) -> Term<'a> {
+    let cell_index = match CellIndex::try_from(cell) {
+        Ok(c) => c,
+        Err(_) => return (atoms::error(), atoms::invalid_index()).encode(env),
+    };
+
+    let cells: Vec<CellIndex> = cell_index.grid_disk::<Vec<_>>(k);
+    let mut binary = NewBinary::new(env, cells.len() * 8);
+    let buf = binary.as_mut_slice();
+    for (i, c) in cells.iter().enumerate() {
+        buf[i * 8..(i + 1) * 8].copy_from_slice(&u64::from(*c).to_ne_bytes());
+    }
+    let binary: rustler::Binary = binary.into();
+    (atoms::ok(), binary).encode(env)
+}
+
 /// Dirty CPU NIF that sleeps for `ms` milliseconds and returns `:ok`.
 /// Used to verify that `ERL_NIF_OPT_DELAY_HALT` allows in-flight dirty
 /// NIFs to complete before the VM halts. Only compiled with the
