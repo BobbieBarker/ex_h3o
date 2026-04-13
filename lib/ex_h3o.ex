@@ -95,6 +95,39 @@ defmodule ExH3o do
   defdelegate is_class3(cell), to: ExH3o.Native
 
   @doc """
+  Converts a valid H3 cell index to its lowercase hex string representation.
+
+  ## Examples
+
+      iex> ExH3o.to_string(0x8928308280fffff)
+      {:ok, "8928308280fffff"}
+
+      iex> ExH3o.to_string(0)
+      {:error, :invalid_index}
+  """
+  @spec to_string(non_neg_integer()) :: {:ok, String.t()} | {:error, :invalid_index}
+  defdelegate to_string(cell), to: ExH3o.Native
+
+  @doc """
+  Parses a hex string into an H3 cell index.
+
+  The string must be valid hexadecimal and represent a valid H3 cell index.
+
+  ## Examples
+
+      iex> ExH3o.from_string("8928308280fffff")
+      {:ok, 0x8928308280fffff}
+
+      iex> ExH3o.from_string("not_hex")
+      {:error, :invalid_string}
+
+      iex> ExH3o.from_string("0000000000000000")
+      {:error, :invalid_string}
+  """
+  @spec from_string(String.t()) :: {:ok, non_neg_integer()} | {:error, :invalid_string}
+  defdelegate from_string(hex), to: ExH3o.Native
+
+  @doc """
   Returns the parent cell at the given resolution.
 
   The target resolution must be coarser than (less than) or equal to the

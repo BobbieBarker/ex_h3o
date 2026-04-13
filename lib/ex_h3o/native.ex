@@ -25,6 +25,12 @@ defmodule ExH3o.Native do
   @spec is_class3(non_neg_integer()) :: {:ok, boolean()} | {:error, :invalid_index}
   def is_class3(_cell), do: :erlang.nif_error(:nif_not_loaded)
 
+  @spec from_string(String.t()) :: {:ok, non_neg_integer()} | {:error, :invalid_string}
+  def from_string(_hex), do: :erlang.nif_error(:nif_not_loaded)
+
+  @spec to_string(non_neg_integer()) :: {:ok, String.t()} | {:error, :invalid_index}
+  def to_string(_cell), do: :erlang.nif_error(:nif_not_loaded)
+
   @spec parent(non_neg_integer(), 0..15) ::
           {:ok, non_neg_integer()} | {:error, :invalid_index | :invalid_resolution}
   def parent(_cell, _resolution), do: :erlang.nif_error(:nif_not_loaded)

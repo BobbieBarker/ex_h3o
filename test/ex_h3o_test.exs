@@ -319,6 +319,80 @@ defmodule ExH3oTest do
     end
   end
 
+  describe "to_string/1" do
+    test "converts valid cell to lowercase hex string" do
+      assert {:ok, "8928308280fffff"} = ExH3o.to_string(@valid_cell)
+    end
+
+    test "converts pentagon cell to lowercase hex string" do
+      assert {:ok, "8009fffffffffff"} = ExH3o.to_string(@pentagon_cell)
+    end
+
+    test "returns error for zero (invalid index)" do
+      assert {:error, :invalid_index} = ExH3o.to_string(@zero)
+    end
+
+    test "returns error for max uint64" do
+      assert {:error, :invalid_index} = ExH3o.to_string(@max_uint64)
+    end
+
+    test "returns error for garbage value" do
+      assert {:error, :invalid_index} = ExH3o.to_string(@garbage)
+    end
+
+    property "returns {:ok, hex_string} or {:error, :invalid_index} for any non-negative integer" do
+      check all(cell <- non_negative_integer()) do
+        case ExH3o.to_string(cell) do
+          {:ok, hex} ->
+            assert is_binary(hex)
+            assert Regex.match?(~r/\A[0-9a-f]+\z/, hex)
+
+          {:error, :invalid_index} ->
+            :ok
+        end
+      end
+    end
+  end
+
+  describe "from_string/1" do
+    test "parses valid hex string to cell index" do
+      assert {:ok, @valid_cell} = ExH3o.from_string("8928308280fffff")
+    end
+
+    test "parses pentagon cell hex string" do
+      assert {:ok, @pentagon_cell} = ExH3o.from_string("8009fffffffffff")
+    end
+
+    test "returns error for non-hex string" do
+      assert {:error, :invalid_string} = ExH3o.from_string("not_hex")
+    end
+
+    test "returns error for empty string" do
+      assert {:error, :invalid_string} = ExH3o.from_string("")
+    end
+
+    test "returns error for valid hex but invalid H3 index" do
+      assert {:error, :invalid_string} = ExH3o.from_string("0000000000000000")
+    end
+
+    property "roundtrip: to_string then from_string returns original cell" do
+      check all(cell <- non_negative_integer()) do
+        with {:ok, hex} <- ExH3o.to_string(cell) do
+          assert {:ok, ^cell} = ExH3o.from_string(hex)
+        end
+      end
+    end
+
+    property "roundtrip: from_string then to_string returns original hex (lowercase)" do
+      check all(cell <- non_negative_integer()) do
+        with {:ok, hex} <- ExH3o.to_string(cell) do
+          assert {:ok, ^hex} =
+                   ExH3o.from_string(hex) |> then(fn {:ok, c} -> ExH3o.to_string(c) end)
+        end
+      end
+    end
+  end
+
   describe "k_ring/2" do
     test "k=0 returns only the cell itself" do
       assert {:ok, [cell]} = ExH3o.k_ring(@valid_cell, 0)

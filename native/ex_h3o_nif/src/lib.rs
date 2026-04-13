@@ -35,6 +35,19 @@ fn is_class3(cell: u64) -> Result<bool, rustler::Atom> {
 }
 
 #[rustler::nif]
+fn from_string(hex: &str) -> Result<u64, rustler::Atom> {
+    let value = u64::from_str_radix(hex, 16).map_err(|_| atoms::invalid_string())?;
+    let cell = CellIndex::try_from(value).map_err(|_| atoms::invalid_string())?;
+    Ok(u64::from(cell))
+}
+
+#[rustler::nif]
+fn to_string(cell: u64) -> Result<String, rustler::Atom> {
+    let cell = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
+    Ok(format!("{:x}", u64::from(cell)))
+}
+
+#[rustler::nif]
 fn parent(cell: u64, resolution: u8) -> Result<u64, rustler::Atom> {
     let cell_index = CellIndex::try_from(cell).map_err(|_| atoms::invalid_index())?;
     let res = Resolution::try_from(resolution).map_err(|_| atoms::invalid_resolution())?;
