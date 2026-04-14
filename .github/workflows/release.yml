@@ -23,20 +23,34 @@ jobs:
             os: macos-15-intel
           - target: x86_64-linux-gnu
             os: ubuntu-24.04
-          # Linux cross-compile targets (phase 2). All three run on
-          # a stock ubuntu-24.04 runner and share one toolchain: zig
-          # (for the C link step, via cc_precompiler's zig cc 4-tuple
-          # in mix.exs) + cargo-zigbuild (for the Rust staticlib side,
-          # enabled via EX_H3O_USE_ZIGBUILD=1). TARGET_ARCH/OS/ABI
-          # pin cc_precompiler's `current_target` to the musl/gnu
-          # triple so each runner emits one artifact for its matrix
-          # entry instead of defaulting to the x86_64-linux-gnu host.
+          # Linux cross-compile targets (phase 2).
+          #
+          # aarch64-linux-gnu uses Ubuntu's stock `gcc-aarch64-linux-gnu`
+          # apt package (installed below, keyed on matrix.apt_packages)
+          # for the C link step, driven by cc_precompiler's default
+          # `"aarch64-linux-gnu-"` prefix. We cannot override this
+          # target's compiler in mix.exs because cc_precompiler has a
+          # bug in compilers_current_os_with_override
+          # (lib/cc_precompiler.ex:72) that drops user overrides for
+          # keys already present in the default map. See mix.exs
+          # comment on the cc_precompiler: block for the full story.
+          #
+          # musl targets are NOT in cc_precompiler's default map, so
+          # our zig cc 4-tuple override in mix.exs applies unchanged.
+          #
+          # Rust builds for all three Linux cross targets go through
+          # `cargo zigbuild` via the EX_H3O_USE_ZIGBUILD=1 Makefile
+          # toggle, keeping one Rust toolchain across the matrix.
+          # TARGET_ARCH/OS/ABI pin cc_precompiler's current_target to
+          # the cross triple (otherwise the runner's host triple
+          # x86_64-linux-gnu wins).
           - target: aarch64-linux-gnu
             os: ubuntu-24.04
             target_arch: aarch64
             target_os: linux
             target_abi: gnu
             zigbuild: "1"
+            apt_packages: "gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
           - target: x86_64-linux-musl
             os: ubuntu-24.04
             target_arch: x86_64
@@ -61,12 +75,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Phase 2 cross-compile setup. `rustup target add` gives rustc
-      # the precompiled std for the Rust target; `mlugg/setup-zig`
-      # installs zig (cached across runs); `cargo install
-      # cargo-zigbuild` wires cargo to use zig's cross-linker. Steps
-      # are gated on the matrix.zigbuild flag so the native-host
-      # targets skip them entirely.
+      # Phase 2 cross-compile setup. Matrix-specific apt packages
+      # (e.g. `gcc-aarch64-linux-gnu` for the glibc aarch64 target's
+      # C link step); `rustup target add` for the Rust staticlib;
+      # `mlugg/setup-zig` + `cargo-zigbuild` for the Rust build
+      # driver. All steps gated on matrix.zigbuild so native jobs
+      # skip them.
+      - name: Install apt cross-compiler packages
+        if: matrix.apt_packages != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt_packages }}
+
       - name: Install Rust target ${{ matrix.target }}
         if: matrix.zigbuild == '1'
         run: |

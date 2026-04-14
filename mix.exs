@@ -36,27 +36,44 @@ defmodule ExH3o.MixProject do
       make_precompiler_filename: "ex_h3o_nif",
       make_precompiler_nif_versions: [versions: ["2.17"]],
       make_force_build: force_build?(),
-      # Phase 2 adds three Linux cross-compile targets, all driven
-      # from one toolchain (zig cc via cc_precompiler's 4-tuple form,
-      # plus cargo-zigbuild for the Rust side via the
-      # EX_H3O_USE_ZIGBUILD=1 Makefile toggle). Overriding
-      # aarch64-linux-gnu here (instead of relying on the default
-      # `aarch64-linux-gnu-gcc` apt package prefix) keeps all three
-      # cross jobs uniform: same zig install, same zig cc, same
-      # cargo zigbuild. `include_default_ones: true` preserves the
-      # macOS entries that phase 1 uses unchanged.
+      # Phase 2 adds three Linux cross-compile targets. musl uses
+      # cc_precompiler's 4-tuple form to point at `zig cc`; glibc
+      # aarch64 uses Ubuntu's standard `gcc-aarch64-linux-gnu` apt
+      # package via cc_precompiler's default `"aarch64-linux-gnu-"`
+      # prefix (see deps/cc_precompiler/lib/cc_precompiler.ex:28-55
+      # default_compilers map).
       #
-      # See deps/cc_precompiler/lib/cc_precompiler.ex:424 for the
-      # EEx render path and README.md L180-211 for the zig cc
-      # 4-tuple pattern.
+      # Why not override aarch64-linux-gnu with zig cc for a uniform
+      # toolchain? cc_precompiler has a bug in its
+      # compilers_current_os_with_override function
+      # (lib/cc_precompiler.ex:72): when include_default_ones is
+      # true, Map.merge is called with a collision function that
+      # returns v2 (the default value), not v1 (the user override),
+      # so user overrides for keys that already exist in the default
+      # map are silently dropped. Discovered during the phase 2
+      # v0.1.0-rc2 dress rehearsal. Filing an upstream fix is the
+      # right long-term move, but blocking on it would delay Alpine
+      # Docker support, so we work around by only overriding target
+      # names that don't collide with cc_precompiler's defaults
+      # (both musl targets). For aarch64-linux-gnu we accept the
+      # default apt prefix and install `gcc-aarch64-linux-gnu` on
+      # the CI runner.
+      #
+      # The `{:unix, :darwin} => %{include_default_ones: true}` entry
+      # is NOT decorative: without it, cc_precompiler's
+      # compilers_current_os_with_override falls through to the
+      # `else` branch (line 77) because the user darwin map is
+      # empty and has no :include_default_ones key, so the darwin
+      # jobs get a completely empty compilers map and silently
+      # produce zero artifacts. Same dress-rehearsal failure mode.
       cc_precompiler: [
         only_listed_targets: true,
         compilers: %{
+          {:unix, :darwin} => %{
+            :include_default_ones => true
+          },
           {:unix, :linux} => %{
             :include_default_ones => true,
-            "aarch64-linux-gnu" =>
-              {"zig", "zig", "<%= cc %> cc -target aarch64-linux-gnu",
-               "<%= cxx %> c++ -target aarch64-linux-gnu"},
             "x86_64-linux-musl" =>
               {"zig", "zig", "<%= cc %> cc -target x86_64-linux-musl",
                "<%= cxx %> c++ -target x86_64-linux-musl"},
