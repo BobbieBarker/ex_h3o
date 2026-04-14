@@ -56,6 +56,12 @@ ifdef CC_PRECOMPILER_CURRENT_TARGET
         RUST_TARGET := x86_64-apple-darwin
     else ifeq ($(CC_PRECOMPILER_CURRENT_TARGET),x86_64-linux-gnu)
         RUST_TARGET := x86_64-unknown-linux-gnu
+    else ifeq ($(CC_PRECOMPILER_CURRENT_TARGET),aarch64-linux-gnu)
+        RUST_TARGET := aarch64-unknown-linux-gnu
+    else ifeq ($(CC_PRECOMPILER_CURRENT_TARGET),x86_64-linux-musl)
+        RUST_TARGET := x86_64-unknown-linux-musl
+    else ifeq ($(CC_PRECOMPILER_CURRENT_TARGET),aarch64-linux-musl)
+        RUST_TARGET := aarch64-unknown-linux-musl
     else
         $(error Unsupported CC_PRECOMPILER_CURRENT_TARGET: $(CC_PRECOMPILER_CURRENT_TARGET))
     endif
@@ -64,6 +70,23 @@ ifdef CC_PRECOMPILER_CURRENT_TARGET
 else
     RUST_TARGET_FLAG :=
     RUST_STATIC      := target/release/libex_h3o_nif.a
+endif
+
+# Rust build driver. Phase 2 cross-compile jobs set
+# EX_H3O_USE_ZIGBUILD=1 and install `cargo-zigbuild`, which proxies
+# `cargo build` through zig's cross-compile toolchain so musl and
+# foreign-arch glibc targets work from a single Ubuntu runner
+# without apt cross-compilers. Native builds (and the macOS matrix)
+# keep using plain `cargo build`.
+#
+# Uses recursive (`=`) expansion so $(CARGO) is evaluated at use
+# time, AFTER the `CARGO ?= cargo` default below. Immediate
+# expansion (`:=`) would resolve $(CARGO) to empty here because
+# CARGO hasn't been set yet at this point in the file.
+ifeq ($(EX_H3O_USE_ZIGBUILD),1)
+    CARGO_SUBCMD = zigbuild
+else
+    CARGO_SUBCMD = build
 endif
 
 ERTS_INCLUDE_DIR := $(shell erl -noinput -eval 'io:format("~s/erts-~s/include", [code:root_dir(), erlang:system_info(version)])' -s init stop)
@@ -96,7 +119,7 @@ endif
 all: $(NIF_SO)
 
 rust:
-	$(CARGO) build --release $(RUST_TARGET_FLAG) --manifest-path Cargo.toml
+	$(CARGO) $(CARGO_SUBCMD) --release $(RUST_TARGET_FLAG) --manifest-path Cargo.toml
 
 $(RUST_STATIC): rust
 
