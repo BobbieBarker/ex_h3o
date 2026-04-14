@@ -57,14 +57,11 @@ defmodule ExH3o.Stress.Runner do
   @spec run([String.t()]) :: :ok | {:error, error_reason()}
   defp run(raw_argv) do
     with :ok <- verify_release_dylib(),
-         argv = normalize_argv(raw_argv),
-         {:ok, opts} <- parse_options(argv),
-         {:ok, library} <- parse_library(opts),
-         {:ok, operation} <- parse_operation(opts),
-         config = build_config(library, operation, opts),
-         :ok <- announce(config),
-         report = Harness.run(config),
-         :ok <- report_to_console(report) do
+         {:ok, opts} <- parse_options(raw_argv),
+         {:ok, config} <- build_config_from_opts(opts),
+         :ok <- announce(config) do
+      report = Harness.run(config)
+      report_to_console(report)
       maybe_write_json(report, config)
     end
   end
@@ -88,26 +85,27 @@ defmodule ExH3o.Stress.Runner do
     Path.join([File.cwd!(), "priv/ex_h3o_nif.so"])
   end
 
-  # --- argv normalization --------------------------------------------------
-  #
-  # `mix run script.exs -- --flag value` passes `["--", "--flag", "value"]`
-  # because `--` is the POSIX end-of-options separator. OptionParser stops
-  # at `--`. Drop it so both `mix run stress.exs --operation polyfill` and
-  # `mix run stress.exs -- --operation polyfill` work.
-
-  defp normalize_argv(["--" | rest]), do: rest
-  defp normalize_argv(argv), do: argv
-
   # --- option parsing ------------------------------------------------------
 
+  # Normalizes the raw argv (stripping the optional `--` POSIX end-of-
+  # options separator so both `mix run stress.exs --operation polyfill`
+  # and `mix run stress.exs -- --operation polyfill` work) and parses
+  # the result against `@option_spec`. Composing the normalization and
+  # the parse into one helper lets the caller's `with` chain consume a
+  # single `{:ok, opts} | {:error, _}` result via `<-`, instead of
+  # smuggling a plain `=` binding into the chain for the normalized
+  # argv.
   @spec parse_options([String.t()]) ::
           {:ok, keyword()} | {:error, {:invalid_options, [{String.t(), String.t() | nil}]}}
-  defp parse_options(argv) do
-    case OptionParser.parse(argv, strict: @option_spec) do
+  defp parse_options(raw_argv) do
+    case raw_argv |> normalize_argv() |> OptionParser.parse(strict: @option_spec) do
       {opts, _rest, []} -> {:ok, opts}
       {_opts, _rest, invalid} -> {:error, {:invalid_options, invalid}}
     end
   end
+
+  defp normalize_argv(["--" | rest]), do: rest
+  defp normalize_argv(argv), do: argv
 
   # --- library parsing (function clauses, not a case) --------------------
 
@@ -152,6 +150,23 @@ defmodule ExH3o.Stress.Runner do
   defp do_parse_operation(other), do: {:error, {:unknown_operation, other}}
 
   # --- config construction ------------------------------------------------
+
+  # Composes library parsing, operation parsing, and config construction
+  # into one fallible step so the caller's `with` chain can bind the
+  # config via a single `<-` instead of threading `library` and
+  # `operation` through plain `=` bindings. The actual `build_config/3`
+  # helper below remains infallible and scalar-arg, so the compose is
+  # isolated here at the boundary where the `with` chain needs an
+  # `{:ok, _} | {:error, _}` shape.
+  @spec build_config_from_opts(keyword()) ::
+          {:ok, Config.t()}
+          | {:error, {:unknown_library, String.t()} | {:unknown_operation, String.t()}}
+  defp build_config_from_opts(opts) do
+    with {:ok, library} <- parse_library(opts),
+         {:ok, operation} <- parse_operation(opts) do
+      {:ok, build_config(library, operation, opts)}
+    end
+  end
 
   @spec build_config(Config.library(), Config.operation(), keyword()) :: Config.t()
   defp build_config(library, operation, opts) do
