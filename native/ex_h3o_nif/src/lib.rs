@@ -116,7 +116,7 @@ pub unsafe extern "C" fn ex_h3o_buf_free(buf: *mut ExH3oBuf) {
         // pointer via `ptr::slice_from_raw_parts_mut` and feeding it
         // back to `Box::from_raw` drops the original allocation
         // exactly once. We deliberately do NOT build a `&mut [u8]`
-        // first — that would briefly create a reference to memory
+        // first; that would briefly create a reference to memory
         // we're immediately taking ownership of.
         let fat = std::ptr::slice_from_raw_parts_mut(data, len);
         let _ = unsafe { Box::from_raw(fat) };
@@ -730,7 +730,7 @@ pub unsafe extern "C" fn ex_h3o_polyfill(
 /// Rust function; only the C-side scheduler flag differs.
 #[no_mangle]
 pub extern "C" fn ex_h3o_null_nif() {
-    // Intentionally empty. No `catch_unwind` needed — an empty body
+    // Intentionally empty. No `catch_unwind` needed: an empty body
     // cannot panic.
 }
 

@@ -26,14 +26,14 @@ aggregation, and analysis of location data.
 
 [erlang-h3](https://hex.pm/packages/h3) is the de-facto H3 binding in
 the Elixir ecosystem. ExH3o is a drop-in alternative that matches or
-beats it across the board, with the biggest wins on `polyfill/2` — the
+beats it across the board, with the biggest wins on `polyfill/2`, the
 bulk-query operation most applications spend their time on.
 
 Measured on an Apple M1 Pro, Elixir 1.19.5 / OTP 28, Benchee head-to-head
 at 5s of measurement per scenario. Times are per-call averages; "faster"
 means ex_h3o's speedup factor over erlang-h3 (higher is better).
 
-### `polyfill/2` — 1.4× to 4.9× faster
+### `polyfill/2`: 1.4× to 4.9× faster
 
 | Polygon          | Resolution | erlang-h3 | ex_h3o   | Faster |
 |------------------|-----------:|----------:|---------:|-------:|
@@ -47,7 +47,7 @@ means ex_h3o's speedup factor over erlang-h3 (higher is better).
 | ~100 km² region  |          7 | 473.80 µs | 273.6 µs | 1.73×  |
 | ~100 km² region  |          8 |   2.54 ms |  1.24 ms | 2.05×  |
 
-### Single-cell operations — several clear wins
+### Single-cell operations: several clear wins
 
 | Operation              | erlang-h3 | ex_h3o   | Faster      |
 |------------------------|----------:|---------:|------------:|
@@ -60,7 +60,7 @@ means ex_h3o's speedup factor over erlang-h3 (higher is better).
 | `from_geo/2`           |    320 ns |    325 ns| ~1× (tied)  |
 | `to_string/1`          |    119 ns |    140 ns| 0.85× slower|
 
-### Grid, hierarchy, set ops — within ~20% of erlang-h3
+### Grid, hierarchy, set ops: within ~20% of erlang-h3
 
 `k_ring/2`, `k_ring_distances/2`, and `children/2` are tied or within
 a ~15% band of erlang-h3 across the full range (k=1 through k=50,
