@@ -4,20 +4,48 @@ defmodule ExH3o.Native do
   # compile time and is replaced at BEAM load by the native
   # implementation in `priv/ex_h3o_nif.so`.
   #
-  # The .so is built out-of-band by `native/ex_h3o_nif/Makefile` (a
-  # C NIF linked against a Rust staticlib that wraps the `h3o` crate).
-  # `elixir_make` in mix.exs drives the Makefile during compile.
+  # Two load modes:
+  #
+  #   1. **Precompiled** (default) — `RustlerPrecompiled` downloads a
+  #      pre-built `.so`/`.dylib`/`.dll` from the GitHub release that
+  #      matches the package version and host target triple.
+  #
+  #   2. **Source build** (`EX_H3O_BUILD=true`) — `elixir_make` drives
+  #      `native/ex_h3o_nif/Makefile`, which runs `cargo build` + `cc`
+  #      to produce `priv/ex_h3o_nif.so` locally.
   #
   # All return shapes are BARE values, no `{:ok, _} | {:error, _}`
   # unions. Invalid inputs raise `ArgumentError` from the C NIF via
   # `enif_make_badarg`. This matches the erlang-h3 / Pattern C contract.
 
-  @on_load :load_nif
+  if System.get_env("EX_H3O_BUILD") in ["1", "true"] do
+    @on_load :load_nif
 
-  @spec load_nif() :: :ok | {:error, term()}
-  def load_nif do
-    path = :filename.join(:code.priv_dir(:ex_h3o), ~c"ex_h3o_nif")
-    :erlang.load_nif(path, 0)
+    @spec load_nif() :: :ok | {:error, term()}
+    def load_nif do
+      path = :filename.join(:code.priv_dir(:ex_h3o), ~c"ex_h3o_nif")
+      :erlang.load_nif(path, 0)
+    end
+  else
+    @version Mix.Project.config()[:version]
+
+    use RustlerPrecompiled,
+      otp_app: :ex_h3o,
+      crate: "ex_h3o_nif",
+      base_url: "https://github.com/bobbiebarker/ex_h3o/releases/download/v#{@version}",
+      version: @version,
+      targets: ~w(
+        aarch64-apple-darwin
+        aarch64-unknown-linux-gnu
+        aarch64-unknown-linux-musl
+        arm-unknown-linux-gnueabihf
+        riscv64gc-unknown-linux-gnu
+        x86_64-apple-darwin
+        x86_64-pc-windows-gnu
+        x86_64-pc-windows-msvc
+        x86_64-unknown-linux-gnu
+        x86_64-unknown-linux-musl
+      )
   end
 
   # --- Single-cell scalar ops (normal scheduler) -------------------------

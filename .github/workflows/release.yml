@@ -1,0 +1,236 @@
+name: Release NIF Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  NIF_VERSION: "2.17"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build NIF (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS ARM64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-14
+            ext: dylib
+
+          # macOS x86-64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            ext: dylib
+
+          # Linux x86-64 (GNU)
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Linux x86-64 (musl)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Linux ARM64 (GNU)
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Linux ARM64 (musl)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Linux ARM 32-bit (GNU)
+          - target: arm-unknown-linux-gnueabihf
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Linux RISC-V 64-bit
+          - target: riscv64gc-unknown-linux-gnu
+            os: ubuntu-22.04
+            ext: so
+            cross: true
+
+          # Windows x86-64 (GNU)
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-22.04
+            ext: dll
+            cross: true
+
+          # Windows x86-64 (MSVC)
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            ext: dll
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux cross-compilation)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install Erlang headers (macOS)
+        if: runner.os == 'macOS'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.2"
+          elixir-version: "1.19.5"
+
+      - name: Install Erlang headers (Ubuntu native)
+        if: runner.os == 'Linux' && !matrix.cross
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.2"
+          elixir-version: "1.19.5"
+
+      - name: Install Erlang headers (Windows)
+        if: runner.os == 'Windows'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.2"
+          elixir-version: "1.19.5"
+
+      # For cross-compiled Linux targets, we need ERTS headers from the
+      # host, then cross-compile the Rust staticlib and C NIF.
+      - name: Install Erlang headers (Linux cross)
+        if: matrix.cross
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.2"
+          elixir-version: "1.19.5"
+
+      - name: Build Rust staticlib (native)
+        if: "!matrix.cross"
+        working-directory: native/ex_h3o_nif
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build Rust staticlib (cross)
+        if: matrix.cross
+        working-directory: native/ex_h3o_nif
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Determine ERTS include dir
+        id: erts
+        shell: bash
+        run: |
+          ERTS_DIR=$(erl -noinput -eval 'io:format("~s/erts-~s/include", [code:root_dir(), erlang:system_info(version)])' -s init stop)
+          echo "include_dir=$ERTS_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Build C NIF (macOS)
+        if: runner.os == 'macOS'
+        working-directory: native/ex_h3o_nif
+        run: |
+          cc -O3 -fPIC -Wall -Wextra \
+            -I${{ steps.erts.outputs.include_dir }} \
+            -dynamiclib -undefined dynamic_lookup \
+            -o libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }} \
+            c_src/ex_h3o_nif.c \
+            target/${{ matrix.target }}/release/libex_h3o_nif.a \
+            -framework Security -framework CoreFoundation
+
+      - name: Build C NIF (Linux native)
+        if: runner.os == 'Linux' && !matrix.cross
+        working-directory: native/ex_h3o_nif
+        run: |
+          cc -O3 -fPIC -Wall -Wextra \
+            -I${{ steps.erts.outputs.include_dir }} \
+            -shared \
+            -o libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }} \
+            c_src/ex_h3o_nif.c \
+            target/${{ matrix.target }}/release/libex_h3o_nif.a
+
+      # Cross-compiled Linux/Windows targets: the Rust staticlib is
+      # cross-compiled, but we still need a cross-C-compiler for the
+      # NIF layer. The `cross` tool handles Rust; for the C NIF we use
+      # the appropriate cross GCC.
+      - name: Build C NIF (Linux/Windows cross)
+        if: matrix.cross
+        working-directory: native/ex_h3o_nif
+        run: |
+          # Map target triple to cross-compiler prefix
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)   CC_CROSS=aarch64-linux-gnu-gcc ;;
+            aarch64-unknown-linux-musl)  CC_CROSS=aarch64-linux-gnu-gcc ;;
+            arm-unknown-linux-gnueabihf) CC_CROSS=arm-linux-gnueabihf-gcc ;;
+            riscv64gc-unknown-linux-gnu) CC_CROSS=riscv64-linux-gnu-gcc ;;
+            x86_64-unknown-linux-gnu)    CC_CROSS=gcc ;;
+            x86_64-unknown-linux-musl)   CC_CROSS=gcc ;;
+            x86_64-pc-windows-gnu)       CC_CROSS=x86_64-w64-mingw32-gcc ;;
+            *) echo "Unknown target: ${{ matrix.target }}" && exit 1 ;;
+          esac
+
+          # Install cross-compilation toolchain if needed
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-*)  sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu ;;
+            arm-unknown-linux-*)      sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf ;;
+            riscv64gc-unknown-linux-*) sudo apt-get update && sudo apt-get install -y gcc-riscv64-linux-gnu ;;
+            x86_64-pc-windows-gnu)    sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 ;;
+          esac
+
+          # Determine link flags
+          if [[ "${{ matrix.ext }}" == "dll" ]]; then
+            LDFLAGS="-shared"
+          else
+            LDFLAGS="-shared"
+          fi
+
+          $CC_CROSS -O3 -fPIC -Wall -Wextra \
+            -I${{ steps.erts.outputs.include_dir }} \
+            $LDFLAGS \
+            -o libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }} \
+            c_src/ex_h3o_nif.c \
+            target/${{ matrix.target }}/release/libex_h3o_nif.a
+
+      - name: Build C NIF (Windows MSVC)
+        if: runner.os == 'Windows'
+        working-directory: native/ex_h3o_nif
+        shell: bash
+        run: |
+          cl.exe /O2 /LD /I "${{ steps.erts.outputs.include_dir }}" \
+            c_src/ex_h3o_nif.c \
+            target/${{ matrix.target }}/release/ex_h3o_nif.lib \
+            /Fe:libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }}
+
+      - name: Compute SHA-256 checksum
+        shell: bash
+        working-directory: native/ex_h3o_nif
+        run: |
+          ARTIFACT="libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }}"
+          shasum -a 256 "$ARTIFACT" > "$ARTIFACT.sha256"
+          cat "$ARTIFACT.sha256"
+
+      - name: Create tar.gz archive
+        shell: bash
+        working-directory: native/ex_h3o_nif
+        run: |
+          ARTIFACT="libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.${{ matrix.ext }}"
+          TAR_NAME="libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.tar.gz"
+          tar -czf "$TAR_NAME" "$ARTIFACT"
+          shasum -a 256 "$TAR_NAME" > "$TAR_NAME.sha256"
+
+      - name: Upload artifact to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            native/ex_h3o_nif/libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.tar.gz
+            native/ex_h3o_nif/libex_h3o_nif-nif-${{ env.NIF_VERSION }}-${{ matrix.target }}.tar.gz.sha256

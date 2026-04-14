@@ -3,6 +3,7 @@ defmodule ExH3o.MixProject do
 
   @version "0.1.0"
   @source_url "https://github.com/bobbiebarker/ex_h3o"
+  @force_build? System.get_env("EX_H3O_BUILD") in ["1", "true"]
 
   def project do
     [
@@ -14,18 +15,19 @@ defmodule ExH3o.MixProject do
       deps: deps(),
       dialyzer: dialyzer(),
 
-      # The NIF layer is a C shared object linked against a Rust
-      # staticlib that wraps h3o. elixir_make drives
-      # `native/ex_h3o_nif/Makefile`, which runs `cargo build` + `cc`
-      # to produce `priv/ex_h3o_nif.so`.
-      compilers: [:elixir_make | Mix.compilers()],
+      # When EX_H3O_BUILD=true, compile the NIF from source via
+      # elixir_make. Otherwise, RustlerPrecompiled downloads a
+      # precompiled binary at compile time.
+      compilers: if(@force_build?, do: [:elixir_make | Mix.compilers()], else: Mix.compilers()),
       make_targets: ["all"],
       make_clean: ["clean"],
       make_cwd: "native/ex_h3o_nif",
 
       # Hex
       description:
-        "Elixir bindings for h3o, a Rust implementation of the H3 geospatial indexing system",
+        "Elixir bindings for h3o, a Rust implementation of the H3 geospatial indexing system. " <>
+          "Designed with a correct NIF boundary (C NIF + Rust staticlib), targets modern OTP 26+, " <>
+          "and provides comprehensive H3 API coverage as a drop-in replacement for erlang-h3.",
       package: package(),
       source_url: @source_url,
 
@@ -63,6 +65,7 @@ defmodule ExH3o.MixProject do
 
   defp deps do
     [
+      {:rustler_precompiled, "~> 0.8"},
       {:elixir_make, "~> 0.8", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -88,7 +91,19 @@ defmodule ExH3o.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      maintainers: ["Bobbie Barker"]
+      maintainers: ["Bobbie Barker"],
+      files: [
+        "lib",
+        "native/ex_h3o_nif/Cargo.toml",
+        "native/ex_h3o_nif/Cargo.lock",
+        "native/ex_h3o_nif/Makefile",
+        "native/ex_h3o_nif/src",
+        "native/ex_h3o_nif/c_src",
+        "checksum-Elixir.ExH3o.Native.exs",
+        "mix.exs",
+        "README.md",
+        "LICENSE"
+      ]
     ]
   end
 

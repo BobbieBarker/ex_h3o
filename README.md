@@ -8,14 +8,31 @@ H3 maps geographic coordinates onto a hierarchical grid of hexagonal
 cells at 16 resolutions. It's widely used for spatial indexing,
 aggregation, and analysis of location data.
 
+## Why ExH3o?
+
+ExH3o exists because the Elixir ecosystem deserves an H3 binding that
+is both fast and easy to install. The design priorities are:
+
+1. **Correct NIF boundary** — a thin C NIF linked against a Rust
+   staticlib. The C layer handles BEAM term encoding; the Rust layer
+   handles H3 logic. No Rustler overhead, no generated C.
+2. **Modern OTP target** — OTP 26+ with `ERL_NIF_OPT_DELAY_HALT` for
+   graceful dirty-NIF shutdown. No legacy compatibility baggage.
+3. **Comprehensive H3 API coverage** — drop-in replacement for
+   [erlang-h3](https://hex.pm/packages/h3) with matching return shapes.
+
+For the architectural reasoning behind these choices, see
+[ADR-001](https://github.com/bobbiebarker/ex_h3o/blob/main/.claude/adr-agent/001-error-systems.md).
+
 ## Features
 
 - Full coverage of common H3 v4 operations: cell indexing, geo
   conversion, k-rings, children/parent hierarchy, neighbors, edges,
   polygon fill, and compaction.
+- **Precompiled binaries** for all major platforms — no Rust toolchain
+  needed. Just `{:ex_h3o, "~> 0.1"}` and `mix deps.get`.
 - Native-speed lookups via a thin C NIF that links against a Rust
-  staticlib wrapping `h3o`. No Rust toolchain is required at runtime,
-  only at build time.
+  staticlib wrapping `h3o`.
 - Bare return values, `ArgumentError` on invalid input. Matches the
   convention used by the reference [erlang-h3](https://hex.pm/packages/h3)
   library, so code that mixes the two doesn't change shape.
@@ -104,21 +121,43 @@ Add `ex_h3o` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:ex_h3o, "~> 0.1.0"}
+    {:ex_h3o, "~> 0.1"}
   ]
 end
 ```
 
-Then run `mix deps.get` and `mix compile`. The compile step builds
-the Rust staticlib via `cargo` and links it into a C shared object
-at `priv/ex_h3o_nif.so`.
+Then run `mix deps.get && mix compile`. A precompiled NIF binary is
+downloaded automatically for your platform — no Rust or C toolchain
+required.
 
-### Build requirements
+### Supported platforms
+
+Precompiled binaries are provided for:
+
+| OS      | Architecture | Variant      |
+|---------|-------------|--------------|
+| macOS   | ARM64       |              |
+| macOS   | x86-64      |              |
+| Linux   | x86-64      | GNU, musl    |
+| Linux   | ARM64       | GNU, musl    |
+| Linux   | ARM 32-bit  | GNU          |
+| Linux   | RISC-V 64   | GNU          |
+| Windows | x86-64      | GNU, MSVC    |
+
+### Building from source
+
+If you need to compile from source (e.g., for a platform without
+precompiled binaries, or to modify the NIF):
+
+```bash
+EX_H3O_BUILD=true mix compile
+```
+
+Source builds require:
 
 - Elixir 1.18+ / OTP 26+ (OTP 28 recommended)
 - A C compiler (`cc`) available on `PATH`
 - A Rust toolchain (`cargo`) available on `PATH`
-- macOS and Linux are supported. Windows is not.
 
 ## Usage
 
