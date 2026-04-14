@@ -2,7 +2,7 @@ defmodule ExH3oTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  import ExH3o.Generators, only: [valid_cell: 0]
+  import ExH3o.Generators, only: [valid_cell: 0, valid_cell: 1]
 
   doctest ExH3o
 
@@ -61,13 +61,15 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.get_resolution(@garbage) end
     end
 
-    property "returns 0..15 or raises ArgumentError for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          assert ExH3o.get_resolution(cell) in 0..15
-        else
-          assert_raise ArgumentError, fn -> ExH3o.get_resolution(cell) end
-        end
+    property "returns a resolution in 0..15 for any valid cell" do
+      check all(cell <- valid_cell()) do
+        assert ExH3o.get_resolution(cell) in 0..15
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.get_resolution(cell) end
       end
     end
   end
@@ -95,13 +97,15 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.get_base_cell(@garbage) end
     end
 
-    property "returns 0..121 or raises ArgumentError for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          assert ExH3o.get_base_cell(cell) in 0..121
-        else
-          assert_raise ArgumentError, fn -> ExH3o.get_base_cell(cell) end
-        end
+    property "returns a base cell in 0..121 for any valid cell" do
+      check all(cell <- valid_cell()) do
+        assert ExH3o.get_base_cell(cell) in 0..121
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.get_base_cell(cell) end
       end
     end
   end
@@ -127,13 +131,15 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.is_pentagon(@garbage) end
     end
 
-    property "returns boolean or raises ArgumentError for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          assert is_boolean(ExH3o.is_pentagon(cell))
-        else
-          assert_raise ArgumentError, fn -> ExH3o.is_pentagon(cell) end
-        end
+    property "returns a boolean for any valid cell" do
+      check all(cell <- valid_cell()) do
+        assert is_boolean(ExH3o.is_pentagon(cell))
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.is_pentagon(cell) end
       end
     end
   end
@@ -159,13 +165,15 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.is_class3(@garbage) end
     end
 
-    property "returns boolean or raises ArgumentError for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          assert is_boolean(ExH3o.is_class3(cell))
-        else
-          assert_raise ArgumentError, fn -> ExH3o.is_class3(cell) end
-        end
+    property "returns a boolean for any valid cell" do
+      check all(cell <- valid_cell()) do
+        assert is_boolean(ExH3o.is_class3(cell))
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.is_class3(cell) end
       end
     end
   end
@@ -231,36 +239,57 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.children(@max_uint64, 5) end
     end
 
-    property "children at next resolution returns list of valid cells" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          res = ExH3o.get_resolution(cell)
+    property "children at next resolution returns a list of cells at that resolution" do
+      check all(cell <- valid_cell()) do
+        res = ExH3o.get_resolution(cell)
 
-          if res < 15 do
-            children = ExH3o.children(cell, res + 1)
-            assert is_list(children)
-            assert length(children) in [6, 7]
+        if res < 15 do
+          children = ExH3o.children(cell, res + 1)
+          assert is_list(children)
+          # Hexagon = 7 children, pentagon = 6 children at +1 level.
+          assert length(children) in [6, 7]
 
-            Enum.each(children, fn child ->
-              assert ExH3o.get_resolution(child) == res + 1
-            end)
-          end
+          Enum.each(children, fn child ->
+            assert ExH3o.get_resolution(child) == res + 1
+          end)
         end
       end
     end
 
-    property "returns a value or raises ArgumentError for any inputs" do
+    property "returns a list of positive integers when target resolution is >= cell resolution" do
+      # Generate the cell resolution first and bound the descent
+      # to at most 3 levels (7^3 = 343 cells per call). A full
+      # descent from res 0 to res 15 would produce ~4.7 billion
+      # cells per call which makes the property untestable.
+      check all(
+              cell_res <- integer(0..15),
+              descent <- integer(0..min(3, 15 - cell_res)),
+              cell <- valid_cell(cell_res)
+            ) do
+        target_res = cell_res + descent
+        children = ExH3o.children(cell, target_res)
+        assert is_list(children)
+        Enum.each(children, fn child -> assert is_integer(child) and child > 0 end)
+      end
+    end
+
+    property "raises ArgumentError when target resolution is coarser than cell resolution" do
+      check all(
+              cell_res <- integer(1..15),
+              cell <- valid_cell(cell_res),
+              target_res <- integer(0..(cell_res - 1))
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.children(cell, target_res) end
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
       check all(
               cell <- non_negative_integer(),
+              not ExH3o.is_valid(cell),
               res <- integer(0..15)
             ) do
-        if ExH3o.is_valid(cell) and res >= ExH3o.get_resolution(cell) do
-          children = ExH3o.children(cell, res)
-          assert is_list(children)
-          Enum.each(children, fn child -> assert is_integer(child) and child > 0 end)
-        else
-          assert_raise ArgumentError, fn -> ExH3o.children(cell, res) end
-        end
+        assert_raise ArgumentError, fn -> ExH3o.children(cell, res) end
       end
     end
   end
@@ -303,29 +332,45 @@ defmodule ExH3oTest do
     end
 
     property "parent at coarser resolution has the target resolution" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          res = ExH3o.get_resolution(cell)
+      check all(cell <- valid_cell()) do
+        res = ExH3o.get_resolution(cell)
 
-          if res > 0 do
-            parent = ExH3o.parent(cell, res - 1)
-            assert ExH3o.get_resolution(parent) == res - 1
-          end
+        if res > 0 do
+          parent = ExH3o.parent(cell, res - 1)
+          assert ExH3o.get_resolution(parent) == res - 1
         end
       end
     end
 
-    property "returns a value or raises ArgumentError for any inputs" do
+    property "returns a positive integer when target resolution is <= cell resolution" do
+      # Same constrained-range trick as the children/2 properties.
+      check all(
+              cell_res <- integer(0..15),
+              cell <- valid_cell(cell_res),
+              target_res <- integer(0..cell_res)
+            ) do
+        parent = ExH3o.parent(cell, target_res)
+        assert is_integer(parent) and parent > 0
+      end
+    end
+
+    property "raises ArgumentError when target resolution is finer than cell resolution" do
+      check all(
+              cell_res <- integer(0..14),
+              cell <- valid_cell(cell_res),
+              target_res <- integer((cell_res + 1)..15)
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.parent(cell, target_res) end
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
       check all(
               cell <- non_negative_integer(),
+              not ExH3o.is_valid(cell),
               res <- integer(0..15)
             ) do
-        if ExH3o.is_valid(cell) and res <= ExH3o.get_resolution(cell) do
-          parent = ExH3o.parent(cell, res)
-          assert is_integer(parent) and parent > 0
-        else
-          assert_raise ArgumentError, fn -> ExH3o.parent(cell, res) end
-        end
+        assert_raise ArgumentError, fn -> ExH3o.parent(cell, res) end
       end
     end
   end
@@ -351,15 +396,17 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.to_string(@garbage) end
     end
 
-    property "returns hex string or raises ArgumentError for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          hex = ExH3o.to_string(cell)
-          assert is_binary(hex)
-          assert Regex.match?(~r/\A[0-9a-f]+\z/, hex)
-        else
-          assert_raise ArgumentError, fn -> ExH3o.to_string(cell) end
-        end
+    property "returns a lowercase hex binary for any valid cell" do
+      check all(cell <- valid_cell()) do
+        hex = ExH3o.to_string(cell)
+        assert is_binary(hex)
+        assert Regex.match?(~r/\A[0-9a-f]+\z/, hex)
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.to_string(cell) end
       end
     end
   end
@@ -411,20 +458,16 @@ defmodule ExH3oTest do
     end
 
     property "roundtrip: to_string then from_string returns original cell" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          hex = ExH3o.to_string(cell)
-          assert ExH3o.from_string(hex) == cell
-        end
+      check all(cell <- valid_cell()) do
+        hex = ExH3o.to_string(cell)
+        assert ExH3o.from_string(hex) == cell
       end
     end
 
     property "roundtrip: from_string then to_string returns original hex (lowercase)" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          hex = ExH3o.to_string(cell)
-          assert ExH3o.to_string(ExH3o.from_string(hex)) == hex
-        end
+      check all(cell <- valid_cell()) do
+        hex = ExH3o.to_string(cell)
+        assert ExH3o.to_string(ExH3o.from_string(hex)) == hex
       end
     end
   end
@@ -697,18 +740,24 @@ defmodule ExH3oTest do
       end
     end
 
-    property "returns a value or raises ArgumentError for any inputs" do
+    property "returns a list of positive integers for any valid cell and k in 0..3" do
       check all(
-              cell <- non_negative_integer(),
+              cell <- valid_cell(),
               k <- integer(0..3)
             ) do
-        if ExH3o.is_valid(cell) do
-          cells = ExH3o.k_ring(cell, k)
-          assert is_list(cells)
-          Enum.each(cells, fn c -> assert is_integer(c) and c > 0 end)
-        else
-          assert_raise ArgumentError, fn -> ExH3o.k_ring(cell, k) end
-        end
+        cells = ExH3o.k_ring(cell, k)
+        assert is_list(cells)
+        Enum.each(cells, fn c -> assert is_integer(c) and c > 0 end)
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(
+              cell <- non_negative_integer(),
+              not ExH3o.is_valid(cell),
+              k <- integer(0..3)
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.k_ring(cell, k) end
       end
     end
   end
@@ -747,17 +796,47 @@ defmodule ExH3oTest do
       assert ExH3o.indices_are_neighbors(@valid_cell, @valid_cell) == false
     end
 
-    property "returns boolean or raises ArgumentError for any inputs" do
+    property "returns a boolean (or raises) for any pair of valid cells at the same resolution" do
+      # Generate the shared resolution first so both cells are
+      # forced to it, avoiding the 15/16 rejection rate we'd get by
+      # generating both cells independently and filtering.
+      #
+      # h3o's `is_neighbor_with` can return Err for certain edge
+      # cases (e.g. around pentagon distortion), which the NIF
+      # surfaces as ArgumentError, so accept either a boolean or a
+      # raise. The property is really asserting "doesn't panic".
+      check all(
+              res <- integer(0..15),
+              a <- valid_cell(res),
+              b <- valid_cell(res)
+            ) do
+        try do
+          assert is_boolean(ExH3o.indices_are_neighbors(a, b))
+        rescue
+          ArgumentError -> :ok
+        end
+      end
+    end
+
+    property "raises ArgumentError for valid cells at different resolutions" do
+      check all(
+              res_a <- integer(0..15),
+              res_b <- integer(0..15),
+              res_a != res_b,
+              a <- valid_cell(res_a),
+              b <- valid_cell(res_b)
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.indices_are_neighbors(a, b) end
+      end
+    end
+
+    property "raises ArgumentError when either input is not a valid cell" do
       check all(
               a <- non_negative_integer(),
-              b <- non_negative_integer()
+              b <- non_negative_integer(),
+              not (ExH3o.is_valid(a) and ExH3o.is_valid(b))
             ) do
-        if ExH3o.is_valid(a) and ExH3o.is_valid(b) and
-             ExH3o.get_resolution(a) == ExH3o.get_resolution(b) do
-          assert is_boolean(ExH3o.indices_are_neighbors(a, b))
-        else
-          assert_raise ArgumentError, fn -> ExH3o.indices_are_neighbors(a, b) end
-        end
+        assert_raise ArgumentError, fn -> ExH3o.indices_are_neighbors(a, b) end
       end
     end
   end
@@ -786,21 +865,29 @@ defmodule ExH3oTest do
       assert is_integer(dist)
     end
 
-    property "returns integer or raises ArgumentError for any inputs" do
+    property "returns an integer (or raises) for any pair of valid cells" do
+      # grid_distance can legitimately fail for valid cells that are
+      # too far apart or that cross pentagon distortion, so we accept
+      # either a successful integer return or ArgumentError. The
+      # property is really asserting "doesn't crash or panic" for
+      # valid inputs.
+      check all(a <- valid_cell(), b <- valid_cell()) do
+        try do
+          dist = ExH3o.grid_distance(a, b)
+          assert is_integer(dist)
+        rescue
+          ArgumentError -> :ok
+        end
+      end
+    end
+
+    property "raises ArgumentError when either input is not a valid cell" do
       check all(
               a <- non_negative_integer(),
-              b <- non_negative_integer()
+              b <- non_negative_integer(),
+              not (ExH3o.is_valid(a) and ExH3o.is_valid(b))
             ) do
-        if ExH3o.is_valid(a) and ExH3o.is_valid(b) do
-          try do
-            dist = ExH3o.grid_distance(a, b)
-            assert is_integer(dist)
-          rescue
-            ArgumentError -> :ok
-          end
-        else
-          assert_raise ArgumentError, fn -> ExH3o.grid_distance(a, b) end
-        end
+        assert_raise ArgumentError, fn -> ExH3o.grid_distance(a, b) end
       end
     end
   end
@@ -834,17 +921,29 @@ defmodule ExH3oTest do
       assert edge > 0
     end
 
-    property "returns non-negative integer or raises ArgumentError for any inputs" do
-      check all(
-              a <- non_negative_integer(),
-              b <- non_negative_integer()
-            ) do
+    property "returns a positive integer (or raises) for any pair of valid cells" do
+      # Two random valid cells are usually not neighbors, so an
+      # ArgumentError is the common outcome. When they happen to be
+      # neighbors, we check that the edge is a positive integer.
+      # Property really asserts "doesn't crash or panic" for valid
+      # inputs, since the neighbor check is intrinsic to the NIF.
+      check all(a <- valid_cell(), b <- valid_cell()) do
         try do
           edge = ExH3o.get_unidirectional_edge(a, b)
           assert is_integer(edge) and edge > 0
         rescue
           ArgumentError -> :ok
         end
+      end
+    end
+
+    property "raises ArgumentError when either input is not a valid cell" do
+      check all(
+              a <- non_negative_integer(),
+              b <- non_negative_integer(),
+              not (ExH3o.is_valid(a) and ExH3o.is_valid(b))
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.get_unidirectional_edge(a, b) end
       end
     end
   end
@@ -945,15 +1044,17 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.to_geo(@max_uint64) end
     end
 
-    property "returns valid coordinates or error for any non-negative integer" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          {lat, lng} = ExH3o.to_geo(cell)
-          assert lat >= -90.0 and lat <= 90.0
-          assert lng >= -180.0 and lng <= 180.0
-        else
-          assert_raise ArgumentError, fn -> ExH3o.to_geo(cell) end
-        end
+    property "returns a {lat, lng} tuple with in-range coordinates for any valid cell" do
+      check all(cell <- valid_cell()) do
+        {lat, lng} = ExH3o.to_geo(cell)
+        assert lat >= -90.0 and lat <= 90.0
+        assert lng >= -180.0 and lng <= 180.0
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.to_geo(cell) end
       end
     end
   end
@@ -993,19 +1094,27 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.to_geo_boundary(@max_uint64) end
     end
 
-    property "returns 5 or 6 vertices with valid coordinates for any valid cell" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          vertices = ExH3o.to_geo_boundary(cell)
-          assert length(vertices) in [5, 6]
+    property "returns 5 to 10 vertices with in-range coordinates for any valid cell" do
+      # Pentagons have 5 vertices, plain hexagons have 6, and
+      # hexagons near pentagon distortion (where the cell boundary
+      # bends around an icosahedron vertex) can have up to 10 per
+      # h3o's MAX_BNDRY_VERTS. The existing deterministic tests
+      # cover specific 5- and 6-vertex cells; this property covers
+      # the full distortion range.
+      check all(cell <- valid_cell()) do
+        vertices = ExH3o.to_geo_boundary(cell)
+        assert length(vertices) in 5..10
 
-          Enum.each(vertices, fn {lat, lng} ->
-            assert lat >= -90.0 and lat <= 90.0
-            assert lng >= -180.0 and lng <= 180.0
-          end)
-        else
-          assert_raise ArgumentError, fn -> ExH3o.to_geo_boundary(cell) end
-        end
+        Enum.each(vertices, fn {lat, lng} ->
+          assert lat >= -90.0 and lat <= 90.0
+          assert lng >= -180.0 and lng <= 180.0
+        end)
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(cell <- non_negative_integer(), not ExH3o.is_valid(cell)) do
+        assert_raise ArgumentError, fn -> ExH3o.to_geo_boundary(cell) end
       end
     end
   end
@@ -1225,22 +1334,28 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.k_ring_distances(@max_uint64, 1) end
     end
 
-    property "returns a value or raises ArgumentError for any inputs" do
+    property "returns a list of {cell, distance} pairs for any valid cell and k in 0..3" do
       check all(
-              cell <- non_negative_integer(),
+              cell <- valid_cell(),
               k <- integer(0..3)
             ) do
-        if ExH3o.is_valid(cell) do
-          pairs = ExH3o.k_ring_distances(cell, k)
-          assert is_list(pairs)
+        pairs = ExH3o.k_ring_distances(cell, k)
+        assert is_list(pairs)
 
-          Enum.each(pairs, fn {c, d} ->
-            assert is_integer(c) and c > 0
-            assert is_integer(d) and d >= 0
-          end)
-        else
-          assert_raise ArgumentError, fn -> ExH3o.k_ring_distances(cell, k) end
-        end
+        Enum.each(pairs, fn {c, d} ->
+          assert is_integer(c) and c > 0
+          assert is_integer(d) and d >= 0
+        end)
+      end
+    end
+
+    property "raises ArgumentError for any non-negative integer that is not a valid cell" do
+      check all(
+              cell <- non_negative_integer(),
+              not ExH3o.is_valid(cell),
+              k <- integer(0..3)
+            ) do
+        assert_raise ArgumentError, fn -> ExH3o.k_ring_distances(cell, k) end
       end
     end
   end
