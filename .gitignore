@@ -19,6 +19,12 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 ex_h3o-*.tar
 
+# Precompiled NIF tarballs from `mix elixir_make.precompile`. These
+# are built in CI by .github/workflows/release.yml and uploaded to
+# GitHub Releases; the local `cache/` dir is only produced by ad hoc
+# verification runs.
+/cache/
+
 # Temporary files, for example, from tests.
 /tmp/
 

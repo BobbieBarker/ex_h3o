@@ -1,7 +1,7 @@
 defmodule ExH3o.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.1.0-dev"
   @source_url "https://github.com/bobbiebarker/ex_h3o"
 
   def project do
@@ -22,6 +22,21 @@ defmodule ExH3o.MixProject do
       make_targets: ["all"],
       make_clean: ["clean"],
       make_cwd: "native/ex_h3o_nif",
+
+      # Precompiled NIF distribution via cc_precompiler. End users
+      # installing ex_h3o from hex.pm get a pre-built `.so`/`.dylib`
+      # for their host triple without needing a Rust toolchain. Force
+      # a local source build with `EX_H3O_BUILD=true` or by depending
+      # on a `-dev` pre-release version. See plan
+      # `~/.claude/plans/expressive-waddling-jellyfish.md` for the
+      # full sequencing and cc_precompiler source references.
+      make_precompiler: {:nif, CCPrecompiler},
+      make_precompiler_url:
+        "https://github.com/BobbieBarker/ex_h3o/releases/download/v#{@version}/@{artefact_filename}",
+      make_precompiler_filename: "ex_h3o_nif",
+      make_precompiler_nif_versions: [versions: ["2.17"]],
+      make_force_build: force_build?(),
+      cc_precompiler: [only_listed_targets: true],
 
       # Hex
       description:
@@ -64,6 +79,7 @@ defmodule ExH3o.MixProject do
   defp deps do
     [
       {:elixir_make, "~> 0.8", runtime: false},
+      {:cc_precompiler, "~> 0.1", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -88,9 +104,33 @@ defmodule ExH3o.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      maintainers: ["Bobbie Barker"]
+      maintainers: ["Bobbie Barker"],
+      # Hex tarball contents. `checksum.exs` is MANDATORY for
+      # precompiled NIF verification at install time; missing it
+      # breaks every `mix deps.get` with a checksum mismatch error.
+      # The native/* entries enable source-build fallback when a
+      # consumer sets EX_H3O_BUILD=true or uses an unsupported
+      # target triple.
+      files: [
+        "lib",
+        "native/ex_h3o_nif/c_src",
+        "native/ex_h3o_nif/src",
+        "native/ex_h3o_nif/Cargo.toml",
+        "native/ex_h3o_nif/Cargo.lock",
+        "native/ex_h3o_nif/Makefile",
+        "checksum.exs",
+        "mix.exs",
+        "README.md",
+        "LICENSE"
+      ]
     ]
   end
+
+  # Force a local source build when EX_H3O_BUILD=true is set. Also
+  # triggered automatically by elixir_make whenever @version has a
+  # pre-release suffix like "-dev", so working on main doesn't try
+  # to download a nonexistent precompiled artifact.
+  defp force_build?, do: System.get_env("EX_H3O_BUILD") in ~w(1 true TRUE)
 
   defp docs do
     [

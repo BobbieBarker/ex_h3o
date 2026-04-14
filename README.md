@@ -109,11 +109,27 @@ def deps do
 end
 ```
 
-Then run `mix deps.get` and `mix compile`. The compile step builds
-the Rust staticlib via `cargo` and links it into a C shared object
-at `priv/ex_h3o_nif.so`.
+Then run `mix deps.get` and `mix compile`. On supported targets the
+compile step downloads a precompiled NIF from the GitHub Release
+matching the package version. On other targets, or when forced via
+`EX_H3O_BUILD=true`, it builds the Rust staticlib locally via
+`cargo` and links it into `priv/ex_h3o_nif.so`.
+
+### Precompiled targets
+
+Precompiled NIFs are published to GitHub Releases for:
+
+- macOS ARM64 (`aarch64-apple-darwin`)
+- macOS x86-64 (`x86_64-apple-darwin`)
+- Linux x86-64 glibc (`x86_64-unknown-linux-gnu`)
+
+On these targets no Rust toolchain is required at install time.
 
 ### Build requirements
+
+Source builds are used for any target outside the list above, and
+can be forced on supported targets by setting `EX_H3O_BUILD=true`
+before `mix compile`. Source builds require:
 
 - Elixir 1.18+ / OTP 26+ (OTP 28 recommended)
 - A C compiler (`cc`) available on `PATH`
