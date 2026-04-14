@@ -19,9 +19,9 @@ defmodule ExH3oPropertyTest do
               cell <- valid_cell(child_res),
               parent_res <- integer(0..(child_res - 1))
             ) do
-        assert {:ok, parent} = ExH3o.parent(cell, parent_res)
+        parent = ExH3o.parent(cell, parent_res)
         assert ExH3o.is_valid(parent)
-        assert {:ok, ^parent_res} = ExH3o.get_resolution(parent)
+        assert ExH3o.get_resolution(parent) == parent_res
       end
     end
   end
@@ -35,8 +35,8 @@ defmodule ExH3oPropertyTest do
         cells = Enum.uniq(cells)
         target_res = res + 1
 
-        {:ok, uncompacted} = ExH3o.uncompact(cells, target_res)
-        {:ok, recompacted} = ExH3o.compact(uncompacted)
+        uncompacted = ExH3o.uncompact(cells, target_res)
+        recompacted = ExH3o.compact(uncompacted)
 
         assert Enum.sort(recompacted) == Enum.sort(cells)
       end
@@ -49,7 +49,7 @@ defmodule ExH3oPropertyTest do
               cell <- valid_cell(5),
               k <- integer(0..3)
             ) do
-        assert {:ok, ring} = ExH3o.k_ring(cell, k)
+        ring = ExH3o.k_ring(cell, k)
         assert cell in ring
       end
     end
@@ -61,8 +61,8 @@ defmodule ExH3oPropertyTest do
               coord <- valid_coordinate(),
               res <- valid_resolution()
             ) do
-        {:ok, cell} = ExH3o.from_geo(coord, res)
-        assert {:ok, ^res} = ExH3o.get_resolution(cell)
+        cell = ExH3o.from_geo(coord, res)
+        assert ExH3o.get_resolution(cell) == res
       end
     end
   end
@@ -70,8 +70,8 @@ defmodule ExH3oPropertyTest do
   describe "to_string/from_string roundtrip" do
     property "to_string -> from_string roundtrips" do
       check all(cell <- valid_cell()) do
-        {:ok, str} = ExH3o.to_string(cell)
-        assert {:ok, ^cell} = ExH3o.from_string(str)
+        str = ExH3o.to_string(cell)
+        assert ExH3o.from_string(str) == cell
       end
     end
   end

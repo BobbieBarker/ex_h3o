@@ -36,8 +36,7 @@ defmodule ExH3o.Generators do
           coord <- valid_coordinate(),
           res <- resolution_generator(resolution)
         ) do
-      {:ok, cell} = ExH3o.from_geo(coord, res)
-      cell
+      ExH3o.from_geo(coord, res)
     end
   end
 
@@ -47,10 +46,7 @@ defmodule ExH3o.Generators do
   @spec valid_cell_set(0..15, pos_integer()) :: StreamData.t([non_neg_integer()])
   def valid_cell_set(resolution, count) when count > 0 do
     gen all(coords <- list_of(valid_coordinate(), length: count)) do
-      Enum.map(coords, fn coord ->
-        {:ok, cell} = ExH3o.from_geo(coord, resolution)
-        cell
-      end)
+      Enum.map(coords, fn coord -> ExH3o.from_geo(coord, resolution) end)
     end
   end
 

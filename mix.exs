@@ -14,9 +14,18 @@ defmodule ExH3o.MixProject do
       deps: deps(),
       dialyzer: dialyzer(),
 
+      # The NIF layer is a C shared object linked against a Rust
+      # staticlib that wraps h3o. elixir_make drives
+      # `native/ex_h3o_nif/Makefile`, which runs `cargo build` + `cc`
+      # to produce `priv/ex_h3o_nif.so`.
+      compilers: [:elixir_make | Mix.compilers()],
+      make_targets: ["all"],
+      make_clean: ["clean"],
+      make_cwd: "native/ex_h3o_nif",
+
       # Hex
       description:
-        "Elixir bindings for h3o — a Rust implementation of the H3 geospatial indexing system",
+        "Elixir bindings for h3o, a Rust implementation of the H3 geospatial indexing system",
       package: package(),
       source_url: @source_url,
 
@@ -54,7 +63,7 @@ defmodule ExH3o.MixProject do
 
   defp deps do
     [
-      {:rustler, "~> 0.37", runtime: false},
+      {:elixir_make, "~> 0.8", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -85,9 +94,34 @@ defmodule ExH3o.MixProject do
 
   defp docs do
     [
-      main: "ExH3o",
+      main: "readme",
+      name: "ExH3o",
       source_ref: "v#{@version}",
-      source_url: @source_url
+      source_url: @source_url,
+      homepage_url: @source_url,
+      formatters: ["html"],
+      extras: [
+        "README.md",
+        LICENSE: [title: "License"]
+      ],
+      # Exclude the stress harness modules from the public hex docs:
+      # they're an internal development tool, not part of the library's
+      # public API. The source and moduledocs are still in the repo for
+      # contributors to read.
+      filter_modules: fn module, _metadata ->
+        not String.starts_with?(inspect(module), "ExH3o.Stress")
+      end,
+      groups_for_docs: [
+        "Pure Elixir": &(&1[:group] == "Pure Elixir"),
+        "Cell inspection": &(&1[:group] == "Cell inspection"),
+        "String conversion": &(&1[:group] == "String conversion"),
+        Hierarchy: &(&1[:group] == "Hierarchy"),
+        "Neighbors & distance": &(&1[:group] == "Neighbors & distance"),
+        "Grid disk": &(&1[:group] == "Grid disk"),
+        "Geo coordinates": &(&1[:group] == "Geo coordinates"),
+        "Set operations": &(&1[:group] == "Set operations"),
+        "Polygon fill": &(&1[:group] == "Polygon fill")
+      ]
     ]
   end
 end

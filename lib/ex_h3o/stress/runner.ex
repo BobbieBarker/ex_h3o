@@ -4,7 +4,7 @@ defmodule ExH3o.Stress.Runner do
   argv normalization, option parsing, config construction, harness invocation,
   and optional JSON report writing.
 
-  `bench/stress.exs` is a one-line invocation of `main/1` — all of the logic
+  `bench/stress.exs` is a one-line invocation of `main/1`. All of the logic
   lives here so it can be unit-tested, extended, and reviewed as normal
   module code rather than as a flat imperative script body.
 
@@ -14,12 +14,13 @@ defmodule ExH3o.Stress.Runner do
   `main/1` function threads them through a `with` chain; the terminal
   result is handled by `handle_result/1` which either returns `:ok` or
   halts the VM with a nonzero exit code and a human-readable diagnostic.
-  No `else` clauses — failures propagate via fall-through.
+  No `else` clauses; failures propagate via fall-through.
   """
 
   alias ExH3o.Stress.{Config, Harness}
 
   @option_spec [
+    library: :string,
     operation: :string,
     concurrency: :integer,
     iterations: :integer,
@@ -28,6 +29,7 @@ defmodule ExH3o.Stress.Runner do
     resolution: :integer,
     children_descent: :integer,
     polyfill_resolution: :integer,
+    duration: :integer,
     json: :string
   ]
 
@@ -35,6 +37,7 @@ defmodule ExH3o.Stress.Runner do
           {:missing_release_dylib, String.t()}
           | {:invalid_options, [{String.t(), String.t() | nil}]}
           | {:unknown_operation, String.t()}
+          | {:unknown_library, String.t()}
 
   @doc """
   CLI entry point. Accepts `System.argv/0` and either returns `:ok` on a
@@ -56,8 +59,9 @@ defmodule ExH3o.Stress.Runner do
     with :ok <- verify_release_dylib(),
          argv = normalize_argv(raw_argv),
          {:ok, opts} <- parse_options(argv),
+         {:ok, library} <- parse_library(opts),
          {:ok, operation} <- parse_operation(opts),
-         config = build_config(operation, opts),
+         config = build_config(library, operation, opts),
          :ok <- announce(config),
          report = Harness.run(config),
          :ok <- report_to_console(report) do
@@ -78,8 +82,10 @@ defmodule ExH3o.Stress.Runner do
     end
   end
 
+  # The NIF lives at priv/ex_h3o_nif.so (built by
+  # native/ex_h3o_nif/Makefile via elixir_make).
   defp release_dylib_path do
-    Path.join([File.cwd!(), "native/ex_h3o_nif/target/release/libex_h3o_nif.dylib"])
+    Path.join([File.cwd!(), "priv/ex_h3o_nif.so"])
   end
 
   # --- argv normalization --------------------------------------------------
@@ -103,13 +109,29 @@ defmodule ExH3o.Stress.Runner do
     end
   end
 
+  # --- library parsing (function clauses, not a case) --------------------
+
+  @spec parse_library(keyword()) ::
+          {:ok, Config.library()} | {:error, {:unknown_library, String.t()}}
+  defp parse_library(opts) do
+    opts
+    |> Keyword.get(:library, "ex_h3o")
+    |> do_parse_library()
+  end
+
+  defp do_parse_library("ex_h3o"), do: {:ok, :ex_h3o}
+  defp do_parse_library("erlang_h3"), do: {:ok, :erlang_h3}
+  defp do_parse_library("erlang-h3"), do: {:ok, :erlang_h3}
+  defp do_parse_library("h3"), do: {:ok, :erlang_h3}
+  defp do_parse_library(other), do: {:error, {:unknown_library, other}}
+
   # --- operation parsing (function clauses, not a case) -------------------
 
   @spec parse_operation(keyword()) ::
           {:ok, Config.operation()} | {:error, {:unknown_operation, String.t()}}
   defp parse_operation(opts) do
     opts
-    |> Keyword.get(:operation, "k_ring")
+    |> Keyword.get(:operation, "polyfill")
     |> do_parse_operation()
   end
 
@@ -119,13 +141,22 @@ defmodule ExH3o.Stress.Runner do
   defp do_parse_operation("compact"), do: {:ok, :compact}
   defp do_parse_operation("uncompact"), do: {:ok, :uncompact}
   defp do_parse_operation("polyfill"), do: {:ok, :polyfill}
+  defp do_parse_operation("round_trip"), do: {:ok, :round_trip}
+  defp do_parse_operation("mixed_chain"), do: {:ok, :mixed_chain}
+  defp do_parse_operation("null_nif"), do: {:ok, :null_nif}
+  defp do_parse_operation("null_nif_dirty"), do: {:ok, :null_nif_dirty}
+  defp do_parse_operation("is_valid"), do: {:ok, :is_valid}
+  defp do_parse_operation("from_geo"), do: {:ok, :from_geo}
+  defp do_parse_operation("to_geo"), do: {:ok, :to_geo}
+  defp do_parse_operation("get_resolution"), do: {:ok, :get_resolution}
   defp do_parse_operation(other), do: {:error, {:unknown_operation, other}}
 
   # --- config construction ------------------------------------------------
 
-  @spec build_config(Config.operation(), keyword()) :: Config.t()
-  defp build_config(operation, opts) do
+  @spec build_config(Config.library(), Config.operation(), keyword()) :: Config.t()
+  defp build_config(library, operation, opts) do
     Config.new(
+      library: library,
       operation: operation,
       concurrency: Keyword.get(opts, :concurrency, 100),
       iterations: Keyword.get(opts, :iterations, 2_000),
@@ -134,6 +165,7 @@ defmodule ExH3o.Stress.Runner do
       base_resolution: Keyword.get(opts, :resolution, 9),
       children_descent: Keyword.get(opts, :children_descent, 2),
       polyfill_resolution: Keyword.get(opts, :polyfill_resolution, 9),
+      duration_seconds: Keyword.get(opts, :duration),
       report_json_path: Keyword.get(opts, :json)
     )
   end
@@ -141,14 +173,27 @@ defmodule ExH3o.Stress.Runner do
   # --- output --------------------------------------------------------------
 
   @spec announce(Config.t()) :: :ok
-  defp announce(%Config{} = config) do
+  defp announce(%Config{duration_seconds: nil} = config) do
     IO.puts("""
 
-    Starting ex_h3o stress harness
+    Starting stress harness (iteration mode)
+      library:      #{config.library}
       operation:    #{config.operation}
       concurrency:  #{config.concurrency}
       iterations:   #{config.iterations} per worker
       total ops:    #{config.concurrency * config.iterations}
+      warmup:       #{config.warmup_iterations} per worker
+    """)
+  end
+
+  defp announce(%Config{} = config) do
+    IO.puts("""
+
+    Starting stress harness (duration mode)
+      library:      #{config.library}
+      operation:    #{config.operation}
+      concurrency:  #{config.concurrency}
+      duration:     #{config.duration_seconds} seconds
       warmup:       #{config.warmup_iterations} per worker
     """)
   end
@@ -197,7 +242,19 @@ defmodule ExH3o.Stress.Runner do
     IO.puts(:stderr, """
     Unknown operation: #{op}
 
-    Valid operations: k_ring, k_ring_distances, children, compact, uncompact, polyfill
+    Valid operations: k_ring, k_ring_distances, children, compact, uncompact, polyfill,
+                      round_trip, mixed_chain, null_nif, null_nif_dirty, is_valid,
+                      from_geo, to_geo, get_resolution
+    """)
+
+    System.halt(1)
+  end
+
+  defp handle_result({:error, {:unknown_library, lib}}) do
+    IO.puts(:stderr, """
+    Unknown library: #{lib}
+
+    Valid libraries: ex_h3o, erlang_h3 (also accepted: erlang-h3, h3)
     """)
 
     System.halt(1)

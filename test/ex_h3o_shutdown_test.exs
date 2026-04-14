@@ -16,16 +16,14 @@ defmodule ExH3oShutdownTest do
 
       erl = System.find_executable("erl")
 
-      nif_so_dir =
-        :ex_h3o
-        |> :code.priv_dir()
-        |> List.to_string()
-        |> Path.join("native")
+      # The .so lives directly under priv/ as `ex_h3o_nif.so` (elixir_make
+      # convention). ExH3o.Native's @on_load calls :erlang.load_nif/2 with
+      # :code.priv_dir(:ex_h3o) as the base path, so the child BEAM just
+      # needs the ebin paths on its code path; :code.priv_dir handles
+      # the rest.
+      priv_dir = :ex_h3o |> :code.priv_dir() |> List.to_string()
+      assert File.exists?(Path.join(priv_dir, "ex_h3o_nif.so"))
 
-      assert File.dir?(nif_so_dir)
-
-      # Pass NIF .so directory and ebin paths via -pa flags to avoid
-      # string interpolation issues with special characters in paths.
       code = """
       spawn(fun() ->
         'Elixir.ExH3o.Native':dirty_sleep(500),
@@ -36,10 +34,7 @@ defmodule ExH3oShutdownTest do
       timer:sleep(2000).
       """
 
-      pa_dirs = [nif_so_dir | ebin_paths()]
-
-      args =
-        Enum.flat_map(pa_dirs, &["-pa", &1]) ++ ["-noshell", "-eval", code]
+      args = Enum.flat_map(ebin_paths(), &["-pa", &1]) ++ ["-noshell", "-eval", code]
 
       port =
         Port.open({:spawn_executable, erl}, [
