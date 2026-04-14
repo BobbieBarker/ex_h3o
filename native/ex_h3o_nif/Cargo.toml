@@ -2,16 +2,30 @@
 name = "ex_h3o_nif"
 version = "0.1.0"
 edition = "2021"
+publish = false
+description = "FFI layer exposing h3o through a minimal extern C ABI. Linked into the ex_h3o_nif.so C NIF at compile time."
 
 [lib]
 name = "ex_h3o_nif"
 path = "src/lib.rs"
-crate-type = ["cdylib"]
-
-[features]
-test_utils = []
+# staticlib produces a .a archive that the C NIF links at compile
+# time, so the final priv/ex_h3o_nif.so is a single self-contained
+# shared library: no rpath needed, no secondary dylib loaded at
+# runtime. Matches how erlang-h3 links libh3.a into its NIF.
+crate-type = ["staticlib"]
 
 [dependencies]
-rustler = { version = "0.37", features = ["nif_version_2_17"] }
+# The `geo` feature is REQUIRED for polyfill: it pulls in
+# h3o::geom::TilerBuilder + geo_types integration. Without it, the
+# polyfill function won't compile.
 h3o = { version = "0.9", features = ["geo"] }
 geo-types = "0.7"
+
+[profile.release]
+# Release profile matches the default shape cargo produces when no
+# overrides are specified: opt-level 3, no LTO, 16 codegen units.
+# Explicit here so the build is reproducible and a future someone
+# who sees this file knows what the trade-offs are.
+opt-level = 3
+lto = false
+codegen-units = 16

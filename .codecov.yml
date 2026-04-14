@@ -2,14 +2,15 @@
 #
 # Exclusion rationale per path:
 #
-# - lib/ex_h3o/native.ex — NIF stub module. Rustler replaces every function
-#   body with the native implementation at BEAM load time, so the stub
-#   `do: :erlang.nif_error(:nif_not_loaded)` body is structurally unreachable
-#   from ExUnit. Coverage is always 0% no matter how many tests are written.
+# - lib/ex_h3o/native.ex: NIF stub module. `:erlang.load_nif/2` replaces
+#   every function body with the native implementation at BEAM load time,
+#   so the stub `do: :erlang.nif_error(:nif_not_loaded)` body is
+#   structurally unreachable from ExUnit. Coverage is always 0% no matter
+#   how many tests are written.
 #
-# - lib/ex_h3o/stress/ — Performance testing infrastructure. The stress
-#   harness is a development tool (invoked via `mix run bench/stress.exs`)
-#   not a production code path. It spawns processes, manipulates scheduler
+# - lib/ex_h3o/stress/: Performance testing infrastructure. The stress
+#   harness is a development tool (invoked via `mix run bench/stress.exs`),
+#   not a user-facing code path. It spawns processes, manipulates scheduler
 #   accounting, and requires a live NIF to meaningfully execute. Writing
 #   ExUnit tests against it would test the test harness itself, which is
 #   backwards. Measured by the bench/ scripts it drives, not by unit tests.

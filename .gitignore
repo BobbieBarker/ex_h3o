@@ -25,7 +25,8 @@ ex_h3o-*.tar
 # Rust build artifacts
 /native/ex_h3o_nif/target/
 
-# Compiled NIF shared library
+# Compiled NIF shared library (rebuilt on every `mix compile`)
+/priv/*.so
 /priv/native/
 
 # Dialyzer PLT files (machine-specific, regenerated per environment)
