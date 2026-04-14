@@ -101,20 +101,31 @@ jobs:
           # mix.exs, this env var pins each runner to its host
           # triple so the matrix emits exactly one tarball per job.
           # For phase 2 cross jobs we ALSO set TARGET_ARCH/OS/ABI
-          # below, which overrides the host-triple detection to
-          # force the intended cross target.
+          # in the shell conditional below, which overrides the
+          # host-triple detection to force the intended cross target.
           CC_PRECOMPILER_PRECOMPILE_ONLY_LOCAL: "true"
           # Pin the tarball output to ./cache/ so the upload glob
           # below is reliable. Without this, elixir_make writes to
           # :filename.basedir(:user_cache, "elixir_make", ...),
           # which varies by OS.
           ELIXIR_MAKE_CACHE_DIR: ${{ github.workspace }}/cache
-          # Phase 2 cross-compile toggles. Empty for native jobs.
-          TARGET_ARCH: ${{ matrix.target_arch }}
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ABI: ${{ matrix.target_abi }}
-          EX_H3O_USE_ZIGBUILD: ${{ matrix.zigbuild }}
-        run: mix elixir_make.precompile
+        # The TARGET_* + EX_H3O_USE_ZIGBUILD exports are scoped to
+        # the run block via a shell conditional so they do NOT leak
+        # to native-host matrix entries. Setting them as top-level
+        # step env vars via `${{ matrix.target_arch }}` would
+        # interpolate to empty strings on native jobs, and
+        # cc_precompiler's `current_target_from_env` (cc_precompiler.ex:97-105)
+        # treats empty strings as "set" (it uses `is_nil/1`), so
+        # current_target would resolve to `"--"` and the precompile
+        # would silently produce zero artifacts.
+        run: |
+          if [ -n "${{ matrix.target_arch }}" ]; then
+            export TARGET_ARCH="${{ matrix.target_arch }}"
+            export TARGET_OS="${{ matrix.target_os }}"
+            export TARGET_ABI="${{ matrix.target_abi }}"
+            export EX_H3O_USE_ZIGBUILD="${{ matrix.zigbuild }}"
+          fi
+          mix elixir_make.precompile
 
       - name: Upload artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
