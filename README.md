@@ -24,78 +24,69 @@ aggregation, and analysis of location data.
 
 ## Performance vs erlang-h3
 
-[erlang-h3](https://hex.pm/packages/h3) is the de-facto H3 binding in
-the Elixir ecosystem. ExH3o is a drop-in alternative that matches or
-beats it across the board, with the biggest wins on `polyfill/2` — the
-bulk-query operation most applications spend their time on.
+[erlang-h3](https://hex.pm/packages/h3) is the established H3 binding
+for the Elixir ecosystem. ExH3o is a drop-in alternative that runs
+faster than erlang-h3 on most operations in the H3 v4 API surface.
 
-Measured on an Apple M1 Pro, Elixir 1.19.5 / OTP 28, Benchee head-to-head
-at 5s of measurement per scenario. Times are per-call averages; "faster"
-means ex_h3o's speedup factor over erlang-h3 (higher is better).
+Benchmarks below were measured on an Apple M1 Pro running Elixir
+1.19.5 / OTP 28, head-to-head under Benchee with 5 seconds of
+measurement per scenario. Times are per-call averages. The `Speedup`
+column is the ratio `erlang-h3 / ex_h3o`; values greater than 1.0
+mean ex_h3o is faster and values less than 1.0 mean ex_h3o is
+slower. See [Reproducing](#reproducing) below to run the same
+suite on your own hardware.
 
-### `polyfill/2` — 1.4× to 4.9× faster
+### `polyfill/2`
 
-| Polygon          | Resolution | erlang-h3 | ex_h3o   | Faster |
-|------------------|-----------:|----------:|---------:|-------:|
-| ~1 SF block      |          7 |  31.03 µs |  6.34 µs | 4.89×  |
-| ~1 SF block      |          9 |  53.31 µs | 18.68 µs | 2.85×  |
-| ~1 SF block      |         11 | 362.45 µs | 198.0 µs | 1.83×  |
-| ~1 km² urban     |          7 |  21.30 µs |  8.24 µs | 2.59×  |
-| ~1 km² urban     |          9 |  97.91 µs | 69.41 µs | 1.41×  |
-| ~1 km² urban     |         11 |   1.92 ms |  0.87 ms | 2.21×  |
-| ~100 km² region  |          5 |  53.91 µs | 23.41 µs | 2.30×  |
-| ~100 km² region  |          7 | 473.80 µs | 273.6 µs | 1.73×  |
-| ~100 km² region  |          8 |   2.54 ms |  1.24 ms | 2.05×  |
+| Polygon          | Resolution | erlang-h3 | ex_h3o   | Speedup |
+|------------------|-----------:|----------:|---------:|--------:|
+| ~1 SF block      |          7 |  31.03 µs |  6.34 µs | 4.89×   |
+| ~1 SF block      |          9 |  53.31 µs | 18.68 µs | 2.85×   |
+| ~1 SF block      |         11 | 362.45 µs | 198.0 µs | 1.83×   |
+| ~1 km² urban     |          7 |  21.30 µs |  8.24 µs | 2.59×   |
+| ~1 km² urban     |          9 |  97.91 µs | 69.41 µs | 1.41×   |
+| ~1 km² urban     |         11 |   1.92 ms |  0.87 ms | 2.21×   |
+| ~100 km² region  |          5 |  53.91 µs | 23.41 µs | 2.30×   |
+| ~100 km² region  |          7 | 473.80 µs | 273.6 µs | 1.73×   |
+| ~100 km² region  |          8 |   2.54 ms |  1.24 ms | 2.05×   |
 
-### Single-cell operations — several clear wins
+### Single-cell operations
 
-| Operation              | erlang-h3 | ex_h3o   | Faster      |
-|------------------------|----------:|---------:|------------:|
-| `is_valid/1` (valid)   |  46.95 ns |  15.64 ns| 3.00×       |
-| `get_base_cell/1`      |  52.47 ns |  20.81 ns| 2.52×       |
-| `get_resolution/1`     |  50.59 ns |  21.08 ns| 2.40×       |
-| `from_string/1`        | 139.06 ns |  70.02 ns| 1.99×       |
-| `is_pentagon/1`        |  30.47 ns |  20.75 ns| 1.47×       |
-| `to_geo/1`             |    284 ns |    248 ns| 1.14×       |
-| `from_geo/2`           |    320 ns |    325 ns| ~1× (tied)  |
-| `to_string/1`          |    119 ns |    140 ns| 0.85× slower|
+| Operation              | erlang-h3 | ex_h3o    | Speedup    |
+|------------------------|----------:|----------:|-----------:|
+| `is_valid/1` (valid)   |  46.95 ns |  15.64 ns | 3.00×      |
+| `get_base_cell/1`      |  52.47 ns |  20.81 ns | 2.52×      |
+| `get_resolution/1`     |  50.59 ns |  21.08 ns | 2.40×      |
+| `from_string/1`        | 139.06 ns |  70.02 ns | 1.99×      |
+| `is_pentagon/1`        |  30.47 ns |  20.75 ns | 1.47×      |
+| `to_geo/1`             |    284 ns |    248 ns | 1.14×      |
+| `from_geo/2`           |    320 ns |    325 ns | 0.98×      |
+| `to_string/1`          |    119 ns |    140 ns | 0.85×      |
 
-### Grid and hierarchy: faster across the board
+### Grid and hierarchy
 
-| Operation              | Input              | erlang-h3 | ex_h3o    | Faster     |
-|------------------------|--------------------|----------:|----------:|-----------:|
-| `k_ring/2`             | k=1 (7 cells)      |    230 ns |    139 ns | **1.66×**  |
-| `k_ring/2`             | k=5 (91 cells)     |   1.82 µs |   1.40 µs | **1.30×**  |
-| `k_ring/2`             | k=10 (331 cells)   |   6.30 µs |   5.46 µs | 1.15×      |
-| `k_ring/2`             | k=20 (1,261 cells) |  27.76 µs |  23.92 µs | 1.16×      |
-| `k_ring/2`             | k=50 (7,651 cells) | 162.37 µs | 163.19 µs | ~1× (tied) |
-| `k_ring_distances/2`   | k=1                |    309 ns |    173 ns | **1.79×**  |
-| `k_ring_distances/2`   | k=5                |   2.08 µs |   1.89 µs | 1.10×      |
-| `k_ring_distances/2`   | k=10               |   7.66 µs |   7.26 µs | 1.06×      |
-| `children/2`           | +1 level (7)       |    180 ns |    134 ns | **1.34×**  |
-| `children/2`           | +2 levels (49)     |    449 ns |    415 ns | 1.08×      |
-| `children/2`           | +3 levels (343)    |   2.72 µs |   2.74 µs | ~1× (tied) |
+| Operation              | Input              | erlang-h3 | ex_h3o    | Speedup |
+|------------------------|--------------------|----------:|----------:|--------:|
+| `k_ring/2`             | k=1 (7 cells)      |    230 ns |    139 ns | 1.66×   |
+| `k_ring/2`             | k=5 (91 cells)     |   1.82 µs |   1.40 µs | 1.30×   |
+| `k_ring/2`             | k=10 (331 cells)   |   6.30 µs |   5.46 µs | 1.15×   |
+| `k_ring/2`             | k=20 (1,261 cells) |  27.76 µs |  23.92 µs | 1.16×   |
+| `k_ring/2`             | k=50 (7,651 cells) | 162.37 µs | 163.19 µs | 0.99×   |
+| `k_ring_distances/2`   | k=1                |    309 ns |    173 ns | 1.79×   |
+| `k_ring_distances/2`   | k=5                |   2.08 µs |   1.89 µs | 1.10×   |
+| `k_ring_distances/2`   | k=10               |   7.66 µs |   7.26 µs | 1.06×   |
+| `children/2`           | +1 level (7)       |    180 ns |    134 ns | 1.34×   |
+| `children/2`           | +2 levels (49)     |    449 ns |    415 ns | 1.08×   |
+| `children/2`           | +3 levels (343)    |   2.72 µs |   2.74 µs | 0.99×   |
 
-Small-k `k_ring/2` used to be a weak spot (1.57× slower at k=1) but
-two rounds of optimization closed the gap and then pushed past
-erlang-h3. First, a stack-buffer fast path eliminated the Rust/C
-packed-binary roundtrip for small k. Second, bypassing h3o's internal
-`Vec<CellIndex>` collect by iterating `grid_disk_fast` directly
-eliminated the last heap allocation on the Rust side. At k=1 ex_h3o
-is now **1.66× faster** than erlang-h3, which is larger than the
-irreducible algorithmic ceiling h3o concedes to libh3 at that specific
-input (~19% per the h3o/libh3 benchmark) — the wrapper-level wins
-more than compensate.
+### Set operations
 
-### Set operations: `compact/1` and `uncompact/2` still trail
-
-`compact/1` and `uncompact/2` are currently 2.04× and 1.33× slower
-than erlang-h3 on small inputs. These are the remaining outliers in
-the suite and the obvious next optimization target.
+`compact/1` and `uncompact/2` are slower than erlang-h3 on small
+inputs (roughly 0.5× and 0.75× speedup in the benchmarks below).
+If your workload leans heavily on these operations, benchmark both
+libraries against representative inputs before choosing.
 
 ### Reproducing
-
-Every number above comes from the bench suite:
 
 ```bash
 mix run bench/single_cell.exs
@@ -103,9 +94,8 @@ mix run bench/collections.exs
 mix run bench/polyfill.exs
 ```
 
-Each script prints a head-to-head comparison table for one category
-of operations. Run them yourself if you want to check the numbers on
-your own hardware.
+Each script prints a head-to-head comparison table for one
+category of operations.
 
 ## Installation
 
