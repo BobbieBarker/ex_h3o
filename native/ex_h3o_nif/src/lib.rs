@@ -554,6 +554,182 @@ pub unsafe extern "C" fn ex_h3o_k_ring_distances(
     })
 }
 
+/// Writes the k-ring around `cell` directly into a caller-provided
+/// `u64` buffer, returning the number of cells written via `*out_len`.
+///
+/// Unlike [`ex_h3o_k_ring`], this function does no heap allocation on
+/// the Rust side of the FFI and imposes no [`ExH3oBuf`] ownership
+/// contract on the caller. It exists so the C NIF can keep a stack
+/// buffer for small-k calls and skip the `Box<[u8]>` / `ErlNifBinary`
+/// roundtrip that dominates total cost when the output is only a few
+/// cells. Above the C NIF's stack-buffer threshold, callers fall back
+/// to the `ExH3oBuf` path.
+///
+/// Returns `0` on success, `1` on failure (invalid cell OR output
+/// wouldn't fit in `out_cap` elements). `out_cap` is counted in `u64`
+/// elements, not bytes; the caller should size the buffer to at least
+/// `3k² + 3k + 1` elements to guarantee no truncation.
+///
+/// # Safety
+///
+/// `out_buf` must be valid for `out_cap * sizeof(u64)` writable bytes
+/// and 8-byte aligned. `out_len` must be a valid, writable `*mut
+/// usize`.
+#[no_mangle]
+pub unsafe extern "C" fn ex_h3o_k_ring_into(
+    cell: u64,
+    k: u32,
+    out_buf: *mut u64,
+    out_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    try_call(|| {
+        let cell = CellIndex::try_from(cell).ok()?;
+
+        // Happy path: `grid_disk_fast` returns an allocation-free
+        // iterator backed by a const-initialized DiskDistancesUnsafe
+        // state machine. On non-pentagon cells every item is Some
+        // and we write straight into out_buf with zero heap traffic.
+        let mut count: usize = 0;
+        let mut pentagon_distortion = false;
+        for maybe_c in cell.grid_disk_fast(k) {
+            match maybe_c {
+                Some(c) => {
+                    if count >= out_cap {
+                        return None;
+                    }
+                    // SAFETY: count < out_cap per the check above;
+                    // caller contract guarantees out_buf is valid for
+                    // out_cap u64 writes and is 8-byte aligned.
+                    unsafe { *out_buf.add(count) = u64::from(c) };
+                    count += 1;
+                }
+                None => {
+                    // Pentagon distortion: rewind and retry with the
+                    // always-correct (but allocating) safe iterator.
+                    pentagon_distortion = true;
+                    break;
+                }
+            }
+        }
+
+        if pentagon_distortion {
+            // Rewind the write cursor and retry with the safe
+            // iterator. Any Some(cell) values the fast path wrote
+            // into out_buf[0..old_count] before hitting None are
+            // discarded: resetting count to 0 causes the safe path
+            // to overwrite them from index 0 onward, and the final
+            // *out_len = count reflects ONLY the safe path's count.
+            // If the safe path's count is smaller than old_count,
+            // the stale fast-path values sitting past the new count
+            // are invisible to the C NIF because it only reads
+            // out_buf[0..*out_len] when building the BEAM list.
+            //
+            // Per h3o's own docs on grid_disk_fast: "the previously
+            // returned cells should be treated as invalid and
+            // discarded" when the iterator returns None. That's
+            // exactly what we're doing.
+            //
+            // This works without cloning `cell` because CellIndex
+            // derives Copy, so cell.grid_disk_fast(k) copied rather
+            // than moved.
+            count = 0;
+            for c in cell.grid_disk_safe(k) {
+                if count >= out_cap {
+                    return None;
+                }
+                // SAFETY: same as the fast-path write above.
+                unsafe { *out_buf.add(count) = u64::from(c) };
+                count += 1;
+            }
+        }
+
+        // SAFETY: caller contract requires out_len to be a valid,
+        // writable *mut usize.
+        unsafe { *out_len = count };
+        Some(())
+    })
+}
+
+/// Writes cell/distance pairs for the k-ring around `cell` directly
+/// into a caller-provided `u64` buffer as interleaved `[cell,
+/// distance, cell, distance, ...]`, returning the number of `u64`
+/// *elements* written via `*out_len` (so the pair count is
+/// `*out_len / 2`).
+///
+/// Companion to [`ex_h3o_k_ring_into`]; same motivation and same
+/// tradeoffs. `out_cap` is in `u64` elements, not pairs, so the
+/// caller should size it to at least `2 * (3k² + 3k + 1)`.
+///
+/// # Safety
+///
+/// Same as [`ex_h3o_k_ring_into`]: `out_buf` must be valid for
+/// `out_cap * sizeof(u64)` writable bytes and 8-byte aligned;
+/// `out_len` must be a valid, writable `*mut usize`.
+#[no_mangle]
+pub unsafe extern "C" fn ex_h3o_k_ring_distances_into(
+    cell: u64,
+    k: u32,
+    out_buf: *mut u64,
+    out_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    try_call(|| {
+        let cell = CellIndex::try_from(cell).ok()?;
+
+        // Happy path: grid_disk_distances_fast is the allocation-free
+        // sibling of grid_disk_fast, yielding Option<(CellIndex, u32)>.
+        let mut count: usize = 0;
+        let mut pentagon_distortion = false;
+        for maybe_pair in cell.grid_disk_distances_fast(k) {
+            match maybe_pair {
+                Some((c, d)) => {
+                    if count + 2 > out_cap {
+                        return None;
+                    }
+                    // SAFETY: count + 2 <= out_cap per the check above,
+                    // and the caller guarantees out_buf is valid for
+                    // out_cap u64 writes and is 8-byte aligned.
+                    unsafe {
+                        *out_buf.add(count) = u64::from(c);
+                        *out_buf.add(count + 1) = u64::from(d);
+                    }
+                    count += 2;
+                }
+                None => {
+                    pentagon_distortion = true;
+                    break;
+                }
+            }
+        }
+
+        if pentagon_distortion {
+            // Rewind. Same reasoning as `ex_h3o_k_ring_into` above:
+            // previously-written fast-path values get overwritten
+            // from index 0, and anything past the safe path's final
+            // count is invisible to C because *out_len is the only
+            // thing the C NIF reads. Relies on CellIndex: Copy so
+            // that grid_disk_distances_fast(k) didn't move `cell`.
+            count = 0;
+            for (c, d) in cell.grid_disk_distances_safe(k) {
+                if count + 2 > out_cap {
+                    return None;
+                }
+                // SAFETY: same as the fast-path write above.
+                unsafe {
+                    *out_buf.add(count) = u64::from(c);
+                    *out_buf.add(count + 1) = u64::from(d);
+                }
+                count += 2;
+            }
+        }
+
+        // SAFETY: caller contract.
+        unsafe { *out_len = count };
+        Some(())
+    })
+}
+
 // ===========================================================================
 // Compact / uncompact
 // ===========================================================================

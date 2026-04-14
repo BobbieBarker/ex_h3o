@@ -60,16 +60,38 @@ means ex_h3o's speedup factor over erlang-h3 (higher is better).
 | `from_geo/2`           |    320 ns |    325 ns| ~1× (tied)  |
 | `to_string/1`          |    119 ns |    140 ns| 0.85× slower|
 
-### Grid, hierarchy, set ops — within ~20% of erlang-h3
+### Grid and hierarchy: faster across the board
 
-`k_ring/2`, `k_ring_distances/2`, and `children/2` are tied or within
-a ~15% band of erlang-h3 across the full range (k=1 through k=50,
-+1 through +3 resolution descents). At larger sizes (k≥10) ex_h3o
-edges ahead; at small k erlang-h3 is slightly faster.
+| Operation              | Input              | erlang-h3 | ex_h3o    | Faster     |
+|------------------------|--------------------|----------:|----------:|-----------:|
+| `k_ring/2`             | k=1 (7 cells)      |    230 ns |    139 ns | **1.66×**  |
+| `k_ring/2`             | k=5 (91 cells)     |   1.82 µs |   1.40 µs | **1.30×**  |
+| `k_ring/2`             | k=10 (331 cells)   |   6.30 µs |   5.46 µs | 1.15×      |
+| `k_ring/2`             | k=20 (1,261 cells) |  27.76 µs |  23.92 µs | 1.16×      |
+| `k_ring/2`             | k=50 (7,651 cells) | 162.37 µs | 163.19 µs | ~1× (tied) |
+| `k_ring_distances/2`   | k=1                |    309 ns |    173 ns | **1.79×**  |
+| `k_ring_distances/2`   | k=5                |   2.08 µs |   1.89 µs | 1.10×      |
+| `k_ring_distances/2`   | k=10               |   7.66 µs |   7.26 µs | 1.06×      |
+| `children/2`           | +1 level (7)       |    180 ns |    134 ns | **1.34×**  |
+| `children/2`           | +2 levels (49)     |    449 ns |    415 ns | 1.08×      |
+| `children/2`           | +3 levels (343)    |   2.72 µs |   2.74 µs | ~1× (tied) |
 
-`compact/1` and `uncompact/2` are currently 1.35× and 2.03× slower
-than erlang-h3 on small inputs. These are the outliers in the suite
-and the obvious next optimization target.
+Small-k `k_ring/2` used to be a weak spot (1.57× slower at k=1) but
+two rounds of optimization closed the gap and then pushed past
+erlang-h3. First, a stack-buffer fast path eliminated the Rust/C
+packed-binary roundtrip for small k. Second, bypassing h3o's internal
+`Vec<CellIndex>` collect by iterating `grid_disk_fast` directly
+eliminated the last heap allocation on the Rust side. At k=1 ex_h3o
+is now **1.66× faster** than erlang-h3, which is larger than the
+irreducible algorithmic ceiling h3o concedes to libh3 at that specific
+input (~19% per the h3o/libh3 benchmark) — the wrapper-level wins
+more than compensate.
+
+### Set operations: `compact/1` and `uncompact/2` still trail
+
+`compact/1` and `uncompact/2` are currently 2.04× and 1.33× slower
+than erlang-h3 on small inputs. These are the remaining outliers in
+the suite and the obvious next optimization target.
 
 ### Reproducing
 
