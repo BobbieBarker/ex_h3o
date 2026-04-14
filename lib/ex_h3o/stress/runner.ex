@@ -60,9 +60,10 @@ defmodule ExH3o.Stress.Runner do
          {:ok, opts} <- parse_options(raw_argv),
          {:ok, config} <- build_config_from_opts(opts),
          :ok <- announce(config) do
-      report = Harness.run(config)
-      report_to_console(report)
-      maybe_write_json(report, config)
+      config
+      |> Harness.run()
+      |> tap(&report_to_console/1)
+      |> maybe_write_json(config)
     end
   end
 
