@@ -36,7 +36,36 @@ defmodule ExH3o.MixProject do
       make_precompiler_filename: "ex_h3o_nif",
       make_precompiler_nif_versions: [versions: ["2.17"]],
       make_force_build: force_build?(),
-      cc_precompiler: [only_listed_targets: true],
+      # Phase 2 adds three Linux cross-compile targets, all driven
+      # from one toolchain (zig cc via cc_precompiler's 4-tuple form,
+      # plus cargo-zigbuild for the Rust side via the
+      # EX_H3O_USE_ZIGBUILD=1 Makefile toggle). Overriding
+      # aarch64-linux-gnu here (instead of relying on the default
+      # `aarch64-linux-gnu-gcc` apt package prefix) keeps all three
+      # cross jobs uniform: same zig install, same zig cc, same
+      # cargo zigbuild. `include_default_ones: true` preserves the
+      # macOS entries that phase 1 uses unchanged.
+      #
+      # See deps/cc_precompiler/lib/cc_precompiler.ex:424 for the
+      # EEx render path and README.md L180-211 for the zig cc
+      # 4-tuple pattern.
+      cc_precompiler: [
+        only_listed_targets: true,
+        compilers: %{
+          {:unix, :linux} => %{
+            :include_default_ones => true,
+            "aarch64-linux-gnu" =>
+              {"zig", "zig", "<%= cc %> cc -target aarch64-linux-gnu",
+               "<%= cxx %> c++ -target aarch64-linux-gnu"},
+            "x86_64-linux-musl" =>
+              {"zig", "zig", "<%= cc %> cc -target x86_64-linux-musl",
+               "<%= cxx %> c++ -target x86_64-linux-musl"},
+            "aarch64-linux-musl" =>
+              {"zig", "zig", "<%= cc %> cc -target aarch64-linux-musl",
+               "<%= cxx %> c++ -target aarch64-linux-musl"}
+          }
+        }
+      ],
 
       # Hex
       description:
