@@ -2,6 +2,8 @@ defmodule ExH3oTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  import ExH3o.Generators, only: [valid_cell: 0]
+
   doctest ExH3o
 
   # Known valid H3 cell at resolution 9
@@ -634,6 +636,37 @@ defmodule ExH3oTest do
       assert @valid_cell in cells
     end
 
+    # ---------------------------------------------------------------
+    # Pentagon coverage. Pentagons have 5 neighbors instead of 6
+    # (one "missing" side from the icosahedron vertex), so k=1 gives
+    # 6 cells total (self + 5), not the hexagon count of 7. These
+    # tests exercise the pentagon-distortion handling path in the
+    # underlying h3o grid_disk iterators.
+    # ---------------------------------------------------------------
+
+    test "pentagon k=0 returns only the pentagon itself" do
+      assert ExH3o.k_ring(@pentagon_cell, 0) == [@pentagon_cell]
+    end
+
+    test "pentagon k=1 returns exactly 6 cells (self + 5 neighbors)" do
+      cells = ExH3o.k_ring(@pentagon_cell, 1)
+      assert length(cells) == 6
+      assert @pentagon_cell in cells
+      assert Enum.uniq(cells) == cells
+      pentagon_res = ExH3o.get_resolution(@pentagon_cell)
+      Enum.each(cells, fn c -> assert ExH3o.get_resolution(c) == pentagon_res end)
+    end
+
+    test "pentagon k=2 strictly grows from k=1 and preserves structural invariants" do
+      k1 = ExH3o.k_ring(@pentagon_cell, 1)
+      k2 = ExH3o.k_ring(@pentagon_cell, 2)
+      assert length(k2) > length(k1)
+      assert @pentagon_cell in k2
+      assert Enum.uniq(k2) == k2
+      pentagon_res = ExH3o.get_resolution(@pentagon_cell)
+      Enum.each(k2, fn c -> assert ExH3o.get_resolution(c) == pentagon_res end)
+    end
+
     test "returns error for invalid cell index" do
       assert_raise ArgumentError, fn -> ExH3o.k_ring(@zero, 1) end
     end
@@ -646,14 +679,21 @@ defmodule ExH3oTest do
       assert_raise ArgumentError, fn -> ExH3o.k_ring(@max_uint64, 1) end
     end
 
-    property "cell count follows 3k² + 3k + 1 formula for valid cells" do
-      check all(cell <- non_negative_integer()) do
-        if ExH3o.is_valid(cell) do
-          k = 1
-          cells = ExH3o.k_ring(cell, k)
-          expected = 3 * k * k + 3 * k + 1
-          assert length(cells) == expected
-        end
+    property "cell count at k=1 is 7 for hexagons and 6 for pentagons" do
+      # Uses the valid_cell generator (which always produces valid
+      # cells via from_geo on random coordinates) instead of filtering
+      # non_negative_integer() with `if ExH3o.is_valid(cell)`, which
+      # almost never hit the assert branch (~0.01% of iterations) and
+      # silently let the hexagon-only formula ship untested.
+      #
+      # The cell-count math at k=1 differs for pentagons: 5 neighbors
+      # + self = 6 cells, vs the hexagon formula 3k² + 3k + 1 = 7 at
+      # k=1. Pinning 6/7 directly is both more honest and more
+      # thoroughly tested by a generator that samples both cell types.
+      check all(cell <- valid_cell()) do
+        cells = ExH3o.k_ring(cell, 1)
+        expected = if ExH3o.is_pentagon(cell), do: 6, else: 7
+        assert length(cells) == expected
       end
     end
 
@@ -1143,6 +1183,34 @@ defmodule ExH3oTest do
       Enum.each(pairs, fn {_cell, dist} ->
         assert is_integer(dist) and dist >= 0
       end)
+    end
+
+    # ---------------------------------------------------------------
+    # Pentagon coverage. Same motivation as the k_ring/2 pentagon
+    # tests above: exercise the distortion path in h3o's distance
+    # iterator.
+    # ---------------------------------------------------------------
+
+    test "pentagon k=1 has center at distance 0 and 5 neighbors at distance 1" do
+      pairs = ExH3o.k_ring_distances(@pentagon_cell, 1)
+      assert length(pairs) == 6
+
+      {at_0, at_1} = Enum.split_with(pairs, fn {_cell, dist} -> dist == 0 end)
+      assert [{@pentagon_cell, 0}] = at_0
+      assert length(at_1) == 5
+      Enum.each(at_1, fn {_cell, dist} -> assert dist == 1 end)
+    end
+
+    test "pentagon k=2 has distances in {0, 1, 2} and unique cells" do
+      pairs = ExH3o.k_ring_distances(@pentagon_cell, 2)
+
+      cells = Enum.map(pairs, fn {c, _d} -> c end)
+      assert Enum.uniq(cells) == cells
+
+      at_0 = Enum.filter(pairs, fn {_c, d} -> d == 0 end)
+      assert [{@pentagon_cell, 0}] = at_0
+
+      Enum.each(pairs, fn {_c, d} -> assert d in [0, 1, 2] end)
     end
 
     test "returns error for invalid cell index" do

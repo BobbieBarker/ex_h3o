@@ -66,6 +66,13 @@ extern int32_t  ex_h3o_get_unidirectional_edge(uint64_t origin, uint64_t destina
 extern int32_t  ex_h3o_k_ring(uint64_t cell, uint32_t k, ExH3oBuf *out);
 extern int32_t  ex_h3o_k_ring_distances(uint64_t cell, uint32_t k, ExH3oBuf *out);
 
+// Grid disk family: stack-buffer fast paths. Writes directly into a
+// caller-provided u64 array instead of the ExH3oBuf heap contract.
+// See the erl_k_ring and erl_k_ring_distances dispatchers below for
+// how the small-k fast path is wired.
+extern int32_t  ex_h3o_k_ring_into(uint64_t cell, uint32_t k, uint64_t *out_buf, size_t out_cap, size_t *out_len);
+extern int32_t  ex_h3o_k_ring_distances_into(uint64_t cell, uint32_t k, uint64_t *out_buf, size_t out_cap, size_t *out_len);
+
 // Compact / uncompact
 extern int32_t  ex_h3o_compact(const uint64_t *cells_data, size_t cell_count, ExH3oBuf *out);
 extern int32_t  ex_h3o_uncompact(const uint64_t *cells_data, size_t cell_count, uint8_t res, ExH3oBuf *out);
@@ -89,81 +96,109 @@ static ERL_NIF_TERM ATOM_OK;
 static ERL_NIF_TERM ATOM_OUT_OF_MEMORY;
 
 // ===========================================================================
-// Shared helpers: materialize an ExH3oBuf as a BEAM term, freeing the
-// Rust-side allocation on the way out (success or failure).
+// Shared helpers: materialize a packed buffer of results as a BEAM list.
 // ===========================================================================
 //
-// Each helper decodes a packed byte buffer produced by the Rust staticlib
-// and constructs a BEAM list in C: boxed u64 cells for grid_disk-style
-// ops, 2-tuples for cell/distance pairs, and float 2-tuples for
-// coordinate rings. Same allocation shape as erlang-h3's C NIF: N boxed
-// terms plus N cons cells on the calling process heap.
+// Each helper reads a packed buffer of u64 cells (or pairs) and builds a
+// BEAM list in C via direct `enif_make_list_cell` cons-cell construction.
+// This matches erlang-h3's hot-path pattern and avoids the intermediate
+// `enif_alloc(count * sizeof(ERL_NIF_TERM))` / `enif_free` pair that
+// `enif_make_list_from_array` requires, which is a meaningful fraction
+// of total call cost at small counts (e.g. `k_ring` at k=1).
+//
+// Two flavors of each helper:
+//
+//   * `make_*_from_buf`:   takes an owned `ExH3oBuf` (heap-allocated by
+//                          the Rust side), reads it, frees it. Used by
+//                          ops where the output size isn't bounded in
+//                          advance, so the Rust side has to allocate
+//                          (polyfill, compact/uncompact, children, and
+//                          the k_ring large-k fallback).
+//
+//   * `make_*_from_u64_array`: takes a raw caller-owned `uint64_t *`
+//                              (typically a C-side stack buffer the
+//                              caller allocated and is about to drop
+//                              when this function returns). Used by
+//                              the small-k fast paths in `erl_k_ring`
+//                              and `erl_k_ring_distances`, which skip
+//                              the Rust-side heap allocation entirely.
 
 // Builds a BEAM list of cell integers (u64) from an ExH3oBuf containing
-// packed `<<u64, u64, ...>>` bytes. Used by k_ring, children, compact,
-// uncompact, polyfill: all the ops that return cell lists.
+// packed `<<u64, u64, ...>>` bytes. Used by the `ExH3oBuf` fallback
+// path for k_ring, children, compact, uncompact, and polyfill.
 static ERL_NIF_TERM
 make_cell_list_from_buf(ErlNifEnv *env, ExH3oBuf *buf)
 {
-    if (buf->len == 0) {
-        ex_h3o_buf_free(buf);
-        return enif_make_list(env, 0);
-    }
     if ((buf->len % 8) != 0) {
         ex_h3o_buf_free(buf);
         return enif_make_badarg(env);
     }
 
     size_t count = buf->len / 8;
-    ERL_NIF_TERM *terms = enif_alloc(count * sizeof(ERL_NIF_TERM));
-    if (terms == NULL) {
-        ex_h3o_buf_free(buf);
-        return enif_raise_exception(env, ATOM_OUT_OF_MEMORY);
-    }
-
     const uint64_t *cells = (const uint64_t *)buf->data;
-    for (size_t i = 0; i < count; i++) {
-        terms[i] = enif_make_uint64(env, cells[i]);
+
+    // Cons from the tail so the final list order matches the input.
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = count; i-- > 0; ) {
+        list = enif_make_list_cell(env, enif_make_uint64(env, cells[i]), list);
     }
 
-    ERL_NIF_TERM list = enif_make_list_from_array(env, terms, (unsigned)count);
-    enif_free(terms);
     ex_h3o_buf_free(buf);
+    return list;
+}
+
+// Builds a BEAM list of cell integers from a caller-owned `uint64_t`
+// array. Used by the stack-buffer fast path in `erl_k_ring` to skip
+// the `ExH3oBuf` heap contract for small k.
+static ERL_NIF_TERM
+make_cell_list_from_u64_array(ErlNifEnv *env, const uint64_t *cells, size_t count)
+{
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = count; i-- > 0; ) {
+        list = enif_make_list_cell(env, enif_make_uint64(env, cells[i]), list);
+    }
     return list;
 }
 
 // Builds a BEAM list of `{cell, distance}` 2-tuples from an ExH3oBuf
 // containing packed `<<u64 cell, u64 distance, ...>>` pairs. Used by
-// k_ring_distances.
+// the large-k fallback in `erl_k_ring_distances`.
 static ERL_NIF_TERM
 make_cell_distance_list_from_buf(ErlNifEnv *env, ExH3oBuf *buf)
 {
-    if (buf->len == 0) {
-        ex_h3o_buf_free(buf);
-        return enif_make_list(env, 0);
-    }
     if ((buf->len % 16) != 0) {
         ex_h3o_buf_free(buf);
         return enif_make_badarg(env);
     }
 
     size_t count = buf->len / 16;
-    ERL_NIF_TERM *terms = enif_alloc(count * sizeof(ERL_NIF_TERM));
-    if (terms == NULL) {
-        ex_h3o_buf_free(buf);
-        return enif_raise_exception(env, ATOM_OUT_OF_MEMORY);
-    }
-
     const uint64_t *pairs = (const uint64_t *)buf->data;
-    for (size_t i = 0; i < count; i++) {
+
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = count; i-- > 0; ) {
         ERL_NIF_TERM cell = enif_make_uint64(env, pairs[i * 2]);
         ERL_NIF_TERM dist = enif_make_uint64(env, pairs[i * 2 + 1]);
-        terms[i] = enif_make_tuple2(env, cell, dist);
+        list = enif_make_list_cell(env, enif_make_tuple2(env, cell, dist), list);
     }
 
-    ERL_NIF_TERM list = enif_make_list_from_array(env, terms, (unsigned)count);
-    enif_free(terms);
     ex_h3o_buf_free(buf);
+    return list;
+}
+
+// Builds a BEAM list of `{cell, distance}` 2-tuples from a caller-owned
+// interleaved `uint64_t` array (`[cell, distance, cell, distance, ...]`).
+// `pair_count` is the number of pairs, so the array length in u64
+// elements is `pair_count * 2`. Used by the stack-buffer fast path in
+// `erl_k_ring_distances`.
+static ERL_NIF_TERM
+make_cell_distance_list_from_u64_array(ErlNifEnv *env, const uint64_t *pairs, size_t pair_count)
+{
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = pair_count; i-- > 0; ) {
+        ERL_NIF_TERM cell = enif_make_uint64(env, pairs[i * 2]);
+        ERL_NIF_TERM dist = enif_make_uint64(env, pairs[i * 2 + 1]);
+        list = enif_make_list_cell(env, enif_make_tuple2(env, cell, dist), list);
+    }
     return list;
 }
 
@@ -173,31 +208,21 @@ make_cell_distance_list_from_buf(ErlNifEnv *env, ExH3oBuf *buf)
 static ERL_NIF_TERM
 make_coord_list_from_buf(ErlNifEnv *env, ExH3oBuf *buf)
 {
-    if (buf->len == 0) {
-        ex_h3o_buf_free(buf);
-        return enif_make_list(env, 0);
-    }
     if ((buf->len % 16) != 0) {
         ex_h3o_buf_free(buf);
         return enif_make_badarg(env);
     }
 
     size_t count = buf->len / 16;
-    ERL_NIF_TERM *terms = enif_alloc(count * sizeof(ERL_NIF_TERM));
-    if (terms == NULL) {
-        ex_h3o_buf_free(buf);
-        return enif_raise_exception(env, ATOM_OUT_OF_MEMORY);
-    }
-
     const double *pairs = (const double *)buf->data;
-    for (size_t i = 0; i < count; i++) {
+
+    ERL_NIF_TERM list = enif_make_list(env, 0);
+    for (size_t i = count; i-- > 0; ) {
         ERL_NIF_TERM lat = enif_make_double(env, pairs[i * 2]);
         ERL_NIF_TERM lng = enif_make_double(env, pairs[i * 2 + 1]);
-        terms[i] = enif_make_tuple2(env, lat, lng);
+        list = enif_make_list_cell(env, enif_make_tuple2(env, lat, lng), list);
     }
 
-    ERL_NIF_TERM list = enif_make_list_from_array(env, terms, (unsigned)count);
-    enif_free(terms);
     ex_h3o_buf_free(buf);
     return list;
 }
@@ -468,8 +493,33 @@ erl_get_unidirectional_edge(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 // ===========================================================================
-// Grid disk family: DirtyCpu
+// Grid disk family
 // ===========================================================================
+//
+// Both `k_ring` and `k_ring_distances` implement a stack-buffer fast
+// path for small k that skips the `ExH3oBuf` heap roundtrip entirely.
+// The Rust staticlib writes cells directly into a caller-owned C
+// stack buffer via `ex_h3o_k_ring_into` / `ex_h3o_k_ring_distances_into`,
+// and the BEAM list is cons'd from that buffer without going through
+// `enif_alloc_binary` + `memcpy` + `ex_h3o_buf_free`.
+//
+// For small k the fixed overhead of the heap path dominates total
+// cost (at k=1 with 7 cells the packed-binary dance accounts for
+// more than the actual h3o work), so the fast path is a meaningful
+// win on exactly the workloads most applications hit. Above the
+// stack threshold the heap `ExH3oBuf` path is strictly better
+// because the stack buffer would be oversized.
+
+// Stack buffer sized for k up to 12 (k=12 gives 3*144 + 36 + 1 = 469
+// cells, comfortably under 512). 512 u64 entries = 4 KB on the stack,
+// well within safe usage on BEAM dirty CPU scheduler threads (default
+// OS thread stacks are MB-scale). Picked to cover the common
+// "k_ring at k <= 10" workload with margin.
+#define EX_H3O_KRING_STACK_CAP 512
+
+// Two u64s per pair, so 512 pairs = 1024 u64 entries = 8 KB. Same
+// k<=12 threshold as k_ring_stack_cap above (k=12 gives 469 pairs).
+#define EX_H3O_KRING_DISTANCES_STACK_CAP 1024
 
 static ERL_NIF_TERM
 erl_k_ring(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
@@ -481,6 +531,22 @@ erl_k_ring(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         !enif_get_uint(env, argv[1], &k)) {
         return enif_make_badarg(env);
     }
+
+    // H3 max-k-ring formula: 3k² + 3k + 1. When the output fits in
+    // our stack buffer, call the `_into` FFI and build the BEAM list
+    // directly from the stack bytes. Skips the ExH3oBuf / memcpy /
+    // ex_h3o_buf_free sequence.
+    size_t expected = (size_t)(3u * k * k) + (size_t)(3u * k) + 1u;
+    if (expected <= EX_H3O_KRING_STACK_CAP) {
+        uint64_t stack_buf[EX_H3O_KRING_STACK_CAP];
+        size_t out_len = 0;
+        if (ex_h3o_k_ring_into(cell, (uint32_t)k, stack_buf, EX_H3O_KRING_STACK_CAP, &out_len) != 0) {
+            return enif_make_badarg(env);
+        }
+        return make_cell_list_from_u64_array(env, stack_buf, out_len);
+    }
+
+    // Large-k fallback: heap-allocated ExH3oBuf path.
     ExH3oBuf buf = {0};
     if (ex_h3o_k_ring(cell, (uint32_t)k, &buf) != 0) {
         ex_h3o_buf_free(&buf);
@@ -499,6 +565,22 @@ erl_k_ring_distances(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
         !enif_get_uint(env, argv[1], &k)) {
         return enif_make_badarg(env);
     }
+
+    // 2 u64 elements per pair (cell + distance), so the stack cap in
+    // elements is `pair_cap * 2`. Pair count bounded by the same
+    // max-k-ring formula as k_ring.
+    size_t expected_pairs = (size_t)(3u * k * k) + (size_t)(3u * k) + 1u;
+    if (expected_pairs * 2 <= EX_H3O_KRING_DISTANCES_STACK_CAP) {
+        uint64_t stack_buf[EX_H3O_KRING_DISTANCES_STACK_CAP];
+        size_t out_len = 0;
+        if (ex_h3o_k_ring_distances_into(
+                cell, (uint32_t)k, stack_buf, EX_H3O_KRING_DISTANCES_STACK_CAP, &out_len) != 0) {
+            return enif_make_badarg(env);
+        }
+        return make_cell_distance_list_from_u64_array(env, stack_buf, out_len / 2);
+    }
+
+    // Large-k fallback: heap-allocated ExH3oBuf path.
     ExH3oBuf buf = {0};
     if (ex_h3o_k_ring_distances(cell, (uint32_t)k, &buf) != 0) {
         ex_h3o_buf_free(&buf);
