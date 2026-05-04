@@ -121,9 +121,13 @@ Precompiled NIFs are published to GitHub Releases for:
 
 - macOS ARM64 (`aarch64-apple-darwin`)
 - macOS x86-64 (`x86_64-apple-darwin`)
-- Linux x86-64 glibc (`x86_64-unknown-linux-gnu`)
+- Linux x86-64 glibc (`x86_64-linux-gnu`)
+- Linux ARM64 glibc (`aarch64-linux-gnu`)
+- Linux x86-64 musl (`x86_64-linux-musl`)
+- Linux ARM64 musl (`aarch64-linux-musl`)
 
 On these targets no Rust toolchain is required at install time.
+This includes Alpine Linux and other musl-based distributions.
 
 ### Build requirements
 
