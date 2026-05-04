@@ -182,8 +182,22 @@ defmodule ExH3o.MixProject do
   defp force_build?, do: System.get_env("EX_H3O_BUILD") in ~w(1 true TRUE)
 
   defp aliases do
-    []
+    [
+      local_ci: [
+        "format --check-formatted",
+        "credo --strict",
+        "compile --warnings-as-errors",
+        "dialyzer",
+        &run_tests/1
+      ]
+    ]
   end
+
+  defp run_tests(_),
+    do: Mix.shell().cmd("mix test", env: [{"MIX_ENV", "test"}]) |> exit_on_nonzero()
+
+  defp exit_on_nonzero(0), do: :ok
+  defp exit_on_nonzero(code), do: Mix.raise("mix test failed with exit code #{code}")
 
   defp docs do
     [
