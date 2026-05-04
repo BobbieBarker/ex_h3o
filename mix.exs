@@ -95,7 +95,10 @@ defmodule ExH3o.MixProject do
       docs: docs(),
 
       # Test
-      test_coverage: [tool: ExCoveralls]
+      test_coverage: [tool: ExCoveralls],
+
+      # Aliases
+      aliases: aliases()
     ]
   end
 
@@ -177,6 +180,10 @@ defmodule ExH3o.MixProject do
   # pre-release suffix like "-dev", so working on main doesn't try
   # to download a nonexistent precompiled artifact.
   defp force_build?, do: System.get_env("EX_H3O_BUILD") in ~w(1 true TRUE)
+
+  defp aliases do
+    []
+  end
 
   defp docs do
     [
