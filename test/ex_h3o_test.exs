@@ -985,11 +985,11 @@ defmodule ExH3oTest do
     end
 
     test "raises for NaN atom in lat" do
-      assert_raise FunctionClauseError, fn -> ExH3o.from_geo({:nan, 0.0}, 9) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:from_geo, [{:nan, 0.0}, 9]) end
     end
 
     test "raises for NaN atom in lng" do
-      assert_raise FunctionClauseError, fn -> ExH3o.from_geo({0.0, :nan}, 9) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:from_geo, [{0.0, :nan}, 9]) end
     end
 
     test "handles boundary coordinates: north pole" do
@@ -1476,18 +1476,25 @@ defmodule ExH3oTest do
     # type error, not a geometry error. The @spec allows both atoms; this
     # test pins the correct one.
     test "raises for non-integer resolution" do
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill(@sf_polygon, "5") end
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill(@sf_polygon, 5.0) end
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill(@sf_polygon, nil) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, [@sf_polygon, "5"]) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, [@sf_polygon, 5.0]) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, [@sf_polygon, nil]) end
     end
 
     # Non-list vertices is a geometry-argument type error regardless of
     # what `resolution` looks like; even if resolution is a valid integer,
     # we should surface `:invalid_geometry` rather than `:invalid_resolution`.
     test "raises for non-list vertices" do
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill("not a list", 9) end
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill(nil, 9) end
-      assert_raise FunctionClauseError, fn -> ExH3o.polyfill(%{}, 9) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, ["not a list", 9]) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, [nil, 9]) end
+      assert_raise FunctionClauseError, fn -> bad_arg_call(:polyfill, [%{}, 9]) end
     end
   end
+
+  # Dispatches an ExH3o function through apply/3 with arguments that
+  # deliberately violate its @spec. The indirection keeps the call
+  # dynamic, so the compile-time type checker leaves the intentional
+  # mismatch alone; these tests assert that the runtime guards reject
+  # the bad input, which static analysis cannot verify on its behalf.
+  defp bad_arg_call(fun, args), do: apply(ExH3o, fun, args)
 end

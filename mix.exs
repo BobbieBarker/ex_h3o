@@ -130,7 +130,7 @@ defmodule ExH3o.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
-      {:stream_data, "~> 0.6", only: [:dev, :test]},
+      {:stream_data, "~> 1.0", only: [:dev, :test]},
       {:benchee, "~> 1.0", only: [:dev, :test]},
       # erlang-h3 is the reference Erlang binding for libh3 3.x, used
       # only as the comparison target for benchmarks. It vendors its

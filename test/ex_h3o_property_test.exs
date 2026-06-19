@@ -75,4 +75,25 @@ defmodule ExH3oPropertyTest do
       end
     end
   end
+
+  describe "polyfill/2" do
+    property "every returned cell is valid and at the requested resolution" do
+      # Resolution is bounded to 0..5: at finer resolutions a degree-scale
+      # polygon would enumerate an enormous number of cells. These invariants
+      # hold for any cell count, including an empty result for a polygon too
+      # small to contain a cell centroid at the chosen resolution.
+      check all(
+              vertex_count <- integer(3..8),
+              polygon <- valid_polygon(vertex_count),
+              res <- integer(0..5)
+            ) do
+        cells = ExH3o.polyfill(polygon, res)
+
+        assert is_list(cells)
+        assert cells == Enum.uniq(cells)
+        assert Enum.all?(cells, &ExH3o.is_valid/1)
+        assert Enum.all?(cells, fn cell -> ExH3o.get_resolution(cell) == res end)
+      end
+    end
+  end
 end
