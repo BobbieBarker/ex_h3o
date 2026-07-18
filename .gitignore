@@ -42,7 +42,6 @@ ex_h3o-*.tar
 /.claude/
 /review-prompts/
 /.forge-framework-cache/
-CLAUDE.md
 
 # Benchmark HTML reports + JSON outputs (regenerated per run)
 /bench/output/
